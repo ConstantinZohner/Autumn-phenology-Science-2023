@@ -1,0 +1,106 @@
+---
+title: "Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice"
+subtitle: "PEP725 data: sample size check"
+---
+
+<br><br>
+
+## 1. Load packages and data
+
+<details><summary>get packages</summary>
+```{r}
+require(data.table)
+require(ggplot2)
+require(tidyverse)
+```
+</details>
+
+<details><summary>get data</summary>
+```{r}
+## set working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/PEP_analysis/Analysis")
+# paths
+PEP_drivers_path = "Analysis_input/PEP_drivers_final/Merged_file"
+
+## Import data
+PEP.df <- fread(paste(PEP_drivers_path, "pep_drivers_data.csv", sep="/"))
+```
+</details>
+
+<br>
+
+## 2. Check sample sizes
+<details><summary>show code</summary>
+```{r}
+#total observations
+nrow(PEP.df)
+
+#how many species have data?
+length(unique(PEP.df$species))
+
+#how many sites in total?
+length(unique(PEP.df$pep_id))
+
+#time span 
+range(PEP.df$year)
+hist(PEP.df$year, xlab="Year", main="Temporal distribution of data", col='lightblue')
+
+#latitudinal gradient 
+range(PEP.df$lat)
+hist(PEP.df$lat, xlab="Latitude", main="Latitudinal gradient", col='lightblue')
+
+#elevational gradient 
+range(PEP.df$alt)
+hist(PEP.df$alt, xlab="Elevation (m)", main="Elevational gradient", col='lightblue')
+
+#leaf-out data
+mean(PEP.df$leaf_out)
+sd(PEP.df$leaf_out)
+range(PEP.df$leaf_out)
+hist(PEP.df$leaf_out, xlab="Leaf-out date", main="Leaf-out gradient", col='lightblue')
+
+#leaf-off data
+mean(PEP.df$leaf_off)
+sd(PEP.df$leaf_off)
+range(PEP.df$leaf_off)
+hist(PEP.df$leaf_off, xlab="Senescence date", main="Senescence gradient", col='lightblue')
+
+#Create summary dataframe by time series
+n.years = PEP.df %>%
+  group_by(timeseries) %>%
+  summarise(count = n())
+mean(n.years$count)
+max(n.years$count)
+min(n.years$count)
+
+#Create summary dataframe by species
+sample.size = PEP.df %>%
+  group_by(species) %>%
+  summarize(n.time.series = length(unique(pep_id)),
+            n.observations = n())
+
+#Sample sizes within species
+data.frame(sample.size)
+
+#Total amount of times series
+sum(sample.size$n.time.series)
+
+#Bar Plot 
+sample.size = reshape2::melt(sample.size, id.vars = c("species"), measure.vars = c("n.time.series","n.observations"))
+ggplot(sample.size, aes(x=species, y=value)) + 
+  geom_bar(stat = "identity")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  facet_wrap(~variable, nrow=2, scales="free_y")
+
+#Map the observations
+mp <- NULL
+mapWorld <- borders("world", colour="gray60", fill="gray60") # create a layer of borders
+mp <- ggplot() + mapWorld
+
+#Now Layer the stations on top
+mp <- mp + geom_point(data=PEP.df[!duplicated(PEP.df[ , c("lat", "lon")]), ], 
+                      aes(x=lon, y=lat) ,color="blue", size=.3) +
+  coord_cartesian(ylim = c(43, 69), xlim = c(-10, 31))
+mp
+```
+</details>

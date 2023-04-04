@@ -1,0 +1,522 @@
+---
+title: "Effect of climate warming on the timing of autumn leaf senescence reverses at the summer solstice"
+subtitle: "Experiment 1: The seasonal effects of temperature and shade on autumn phenology"
+---
+
+<br><br>
+
+## 1. Load packages and functions
+
+<details><summary>load packages</summary>
+
+```{r, message=FALSE, warning=FALSE}
+require(ggplot2)
+require(tidyverse)
+require(broom)
+require(patchwork)
+require(lubridate)
+require(data.table)
+require(gmodels)
+require(wesanderson)
+require(mgcv)
+```
+
+</details>
+
+<details><summary>load functions</summary>
+
+```{r, message=FALSE, warning=FALSE}
+##########################################
+# SPAD reading to chlorophyll conversion #
+##########################################
+
+
+SPADtoChl = function(SPAD){
+  Chl = ifelse(SPAD==0, 0, -0.0029*(SPAD^2) + 1.175*SPAD + 3.8506)
+  return(Chl)
+}
+#SPAD: unitless
+#Chl: leaf chlorophyll in microgram / gram fresh weight
+#Intercept forced to zero
+
+#From Percival et al. 2008: The Potential of a Chlorophyll Content SPAD Meter to Quantify Nutrient Stress in Foliar Tissue of Sycamore (Acer pseudoplatanus), English Oak (Quercus robur), and European Beech (Fagus sylvatica)
+
+
+
+############################
+# Keep only number in string
+############################
+
+
+keep.number = function(x){
+  as.numeric(gsub("[^\\d]+", "", x, perl=TRUE))}
+```
+
+</details>
+
+<br>
+
+## 2. Load data
+
+<details>
+
+<summary>data tables</summary>
+
+```{r}
+################
+# define paths #
+################
+
+
+data.dir   = "/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Experiment1/Data/Chlorophyll"
+output.dir = "/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Experiment1/R_output/Chlorophyll"
+
+
+
+#########################
+# Load chlorophyll data #
+#########################
+
+
+chlorophyll.data = read.table(paste(data.dir,"Chlorophyll_2021_master.csv",sep="/"), header=T, sep=",") %>%
+  
+  #delete dead individuals
+  group_by(ID) %>%
+  mutate(dead.proportion = mean(as.numeric(Dead)))%>%
+  ungroup() %>%
+  filter(dead.proportion <0.5) %>%
+  
+  #delete NAs and Groups
+  filter(!is.na(SPAD),
+         !(Group %in% c("M","L","N","O","P"))) %>%
+  
+  #Convert dates to DOY
+  mutate(
+    #Convert dates to DOY
+    date = dmy(date),
+    #merge controls
+    time.period = ifelse(Group %in% c("C","H"),1,
+                         ifelse(Group %in% c("D","I"),2,
+                                ifelse(Group %in% c("E","J"),3,
+                                       ifelse(Group %in% c("F","K"),4,0)))),
+    Treatment = ifelse(Group %in% c("C","D","E","F"),"Shade",
+                       ifelse(Group %in% c("H","I","J","K"),"Temperature", "Control"))) %>%
+  
+  #delete observations during and after treatment period
+  filter(
+    #Treatment 1
+    !(time.period == 1 & date > as.Date("2021-04-30", format="%Y-%m-%d") & 
+        date < as.Date("2021-06-15", format="%Y-%m-%d")),
+    #Treatment 2
+    !(time.period == 2 & date > as.Date("2021-05-26", format="%Y-%m-%d") & 
+        date < as.Date("2021-07-15", format="%Y-%m-%d")),
+    #Treatment 3
+    !(time.period == 3 & date > as.Date("2021-06-25", format="%Y-%m-%d") & 
+        date < as.Date("2021-08-15", format="%Y-%m-%d")),
+    #Treatment 4
+    !(time.period == 4 & date > as.Date("2021-07-25", format="%Y-%m-%d") & 
+        date < as.Date("2021-09-15", format="%Y-%m-%d")) )
+```
+
+</details><details><summary>ggplot themes</summary>
+
+```{r}
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_rect(fill=NA, size=0.5, linetype="solid"),
+  legend.text       = element_text(color="black"),
+  panel.background  = element_blank(),
+  axis.text         = element_text(colour = "black"),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold",hjust = 0.5))
+```
+
+</details>
+
+<br>
+
+## 3. Prepare and analyze chlorophyll data
+
+<details><summary>Sample sizes</summary>
+
+```{r}
+table(chlorophyll.data$Group, chlorophyll.data$date)
+
+table(chlorophyll.data[chlorophyll.data$date=="2022-01-20",]$Group, chlorophyll.data[chlorophyll.data$date=="2022-01-20",]$date)
+
+sum(table(chlorophyll.data[chlorophyll.data$date=="2022-01-20",]$Group, chlorophyll.data[chlorophyll.data$date=="2022-01-20",]$date))
+```
+
+</details>
+
+<details><summary>Data preparation</summary>
+
+```{r, warning=F, message=F}
+#####################################################################
+## Transform SPAD to chlorophyll and get relative chlorophyll content
+#####################################################################
+
+
+chlorophyll.data = chlorophyll.data %>%
+  group_by(ID)%>%
+  mutate(
+    #convert SPAD readings to Chlorophyll content (Percival et al. 2008)
+    chlorophyll     = SPADtoChl(SPAD),
+    #get relative chlorophyll content per individual
+    chlorophyll.rel = chlorophyll / max(chlorophyll), 
+    #get date of maximum chlorophyll content per individual
+    date.max.chl    = date[which.max(chlorophyll)]) %>%
+  ungroup()
+
+
+
+##################################################################################
+## Interpolate 10% and 50% senescence dates from seasonal chlorophyll measurements
+##################################################################################
+
+
+# Interpolate EOS10 (date chlorophyll last dropped below 90%)
+senescence.data.10 = chlorophyll.data %>%
+  group_by(ID, Group, Treatment, time.period) %>%
+  # Find the last row with >90% chlorophyll in each group, keep only this row and next
+  filter(row_number() <= max(which(chlorophyll.rel > 0.9))+1,
+         row_number() >= max(which(chlorophyll.rel > 0.9))) %>%
+  #Linear interpolation
+  summarize(EOS     = as.Date(approx(chlorophyll.rel, date, .9,  ties=min)$y, origin="1970-01-01")) %>%
+  mutate(EOS.DOY    = yday(EOS),
+         phenophase = "EOS10") %>%
+  ungroup()
+
+# Interpolate EOS50 (date chlorophyll last dropped below 50%)
+senescence.data.50 = chlorophyll.data %>%
+  group_by(ID, Group, Treatment, time.period) %>%
+  # Find the last row with >50% chlorophyll in each group, keep only this row and next
+  filter(row_number() <= max(which(chlorophyll.rel > 0.5))+1,
+         row_number() >= max(which(chlorophyll.rel > 0.5))) %>%
+  #Linear interpolation
+  summarize(EOS     = as.Date(approx(chlorophyll.rel, date, .5,  ties=min)$y, origin="1970-01-01")) %>%
+  mutate(EOS.DOY    = yday(EOS),
+         phenophase = "EOS50") %>%
+  ungroup()
+
+# Rbind
+senescence.data = rbind(senescence.data.10,senescence.data.50)
+```
+
+</details>
+
+<details><summary>Senescence date analysis</summary>
+
+```{r,warning=F}
+################
+## Linear models
+################
+
+
+#Temperature
+resultsLMtemperature = senescence.data %>% 
+  filter(!Treatment == "Shade")%>%
+  group_by(phenophase) %>% 
+  do({model = lm(EOS.DOY ~ as.factor(time.period), data=.)  # create your model
+  data.frame(tidy(model),
+             lowCI=ci(model)[,2],
+             hiCI=ci(model)[,3])}) %>%
+  filter(!term %in% c("(Intercept)")) %>%
+  mutate(phenophase = factor(phenophase, levels=c("EOS10","EOS50")),
+         model = "temperature")
+
+#Shade
+resultsLMshade = senescence.data %>% 
+  filter(!Treatment == "Temperature")%>%
+  group_by(phenophase) %>% 
+  do({model = lm(EOS.DOY ~ as.factor(time.period), data=.)  # create your model
+  data.frame(tidy(model),
+             lowCI=ci(model)[,2],
+             hiCI=ci(model)[,3])}) %>%
+  filter(!term %in% c("(Intercept)")) %>%
+  mutate(phenophase = factor(phenophase, levels=c("EOS10","EOS50")),
+         model = "shade")
+
+#Rbind
+resultsLM = rbind(resultsLMtemperature, resultsLMshade) %>%
+  mutate(term=keep.number(term),
+         variable.type = paste(model, phenophase, sep="."),
+         model = factor(model, levels = c("temperature","shade"), ordered=T),
+         #Reverse effect sizes
+         estimate = estimate*(-1),
+         lowCI = lowCI*(-1),
+         hiCI = hiCI*(-1))
+
+#Show results
+as.data.frame(resultsLM) %>%
+  dplyr::select(-c(variable.type,statistic))%>%
+  mutate_if(is.numeric, round, digits=3)
+```
+
+</details>
+
+<br>
+
+## 4. Figures
+
+</details>
+
+<details><summary>plot 1: Linear model interpolation</summary>
+
+```{r, fig.align = "center"}
+########################################
+## Interpolation of monthly estimates ##
+########################################
+
+
+#Interpolation function
+lin_interp = function(x, y, length.out=100) {
+  approx(x, y, xout=seq(min(x), max(x), length.out=length.out))$y
+}
+
+#create identifier
+variable.type = unique(resultsLM$variable.type)
+
+#create interpolation dataframe
+df.interp = data.frame()
+
+#loop over variable x equation x vegetation type vector
+for (variable.name in variable.type){
+
+  #subset table
+  df.sub = resultsLM  %>% 
+    filter(variable.type == variable.name)
+  
+  # Interpolate data
+  created.interp = lin_interp(df.sub$term, df.sub$term)
+  score.interp   = lin_interp(df.sub$term, df.sub$estimate)
+  df.interp.sub  = data.frame(created=created.interp, score=score.interp)
+  # Make a grouping variable for each pos/neg segment
+  cat.rle             = rle(df.interp.sub$score < 0)
+  df.interp.sub       = df.interp.sub %>%
+    mutate(group      = rep.int(1:length(cat.rle$lengths),  times=cat.rle$lengths),
+           phenophase = unique(df.sub$phenophase),
+           model      = unique(df.sub$model),
+           variable.type = variable.name)
+  #rbind sub dataframes 
+  df.interp = rbind(df.interp, df.interp.sub)
+}
+
+
+#Plot
+LMplot50 = ggplot() + 
+  geom_area(data = df.interp[df.interp$phenophase=="EOS50",], aes(x = created, y = score, fill=score>0, group=group)) + 
+  scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+  geom_point(data=resultsLM[resultsLM$phenophase=="EOS50",], aes(x=term, y=estimate))+
+  geom_errorbar(data=resultsLM[resultsLM$phenophase=="EOS50",], 
+                aes(x=term, ymin=lowCI, ymax=hiCI), 
+                width=.2, position=position_dodge(.9)) +
+  geom_hline(yintercept=0)+
+  geom_vline(xintercept=2.5, size=2, alpha=0.4)+
+  coord_cartesian(ylim=c(-15,15))+
+  xlab("")+ylab("EOS50 anomaly (days)")+
+  scale_x_continuous(breaks = seq(1,4,by=1),
+                     labels = c('May','Jun','Jul','Aug'))+
+  facet_wrap(~model, ncol=1)+
+  plotTheme1
+
+#Save PDF
+pdf(paste(output.dir,"LinearModelPlot.pdf",sep="/"), width=3, height=4, useDingbats=FALSE)
+LMplot50
+dev.off()
+
+LMplot50
+
+LMplot10 = ggplot() + 
+  geom_area(data = df.interp[df.interp$phenophase=="EOS10",], aes(x = created, y = score, fill=score>0, group=group)) + 
+  scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+  geom_point(data=resultsLM[resultsLM$phenophase=="EOS10",], aes(x=term, y=estimate))+
+  geom_errorbar(data=resultsLM[resultsLM$phenophase=="EOS10",], 
+                aes(x=term, ymin=lowCI, ymax=hiCI), 
+                width=.2, position=position_dodge(.9)) +
+  geom_hline(yintercept=0)+
+  geom_vline(xintercept=2.5, size=2, alpha=0.4)+
+  coord_cartesian(ylim=c(-35,35))+
+  xlab("")+ylab("EOS10 anomaly (days)")+
+  scale_x_continuous(breaks = seq(1,4,by=1),
+                     labels = c('May','Jun','Jul','Aug'))+
+  facet_wrap(~model, ncol=1)+
+  plotTheme1
+
+#Save PDF
+pdf(paste(output.dir,"LinearModelPlot10.pdf",sep="/"), width=3, height=4, useDingbats=FALSE)
+LMplot10
+dev.off()
+
+LMplot10
+```
+
+</details>
+
+<details><summary>plot 2: Chlorophyll curves</summary>
+
+```{r, fig.align = "center"}
+#move points .05 to the left and right
+pd = position_dodge(2) 
+
+
+#Temperature treatment
+Temperature_curve = chlorophyll.data %>%
+  filter(!Treatment=="Shade") %>%
+  mutate(time.period=as.factor(time.period),
+         time.period = plyr::revalue(time.period, 
+                                     c("0" = "Control" ,
+                                       "1" = "May",
+                                       "2" = "June",
+                                       "3" = "July",
+                                       "4" = "August"))) %>%
+  ggplot(aes(x=date, y=chlorophyll.rel*100, colour=time.period, group=time.period)) +
+
+  geom_hline(yintercept = 50, colour="lightgrey")+
+  geom_hline(yintercept = 10, colour="lightgrey")+
+  geom_hline(yintercept = 90, colour="lightgrey")+
+  
+  geom_vline(xintercept = as.Date('2021-11-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-10-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-09-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-08-01'), colour="lightgrey")+
+  
+  stat_summary(fun.data = "mean_cl_normal", geom="line", size = 1.2, position=pd, alpha=0.7) +
+  stat_summary(fun.data = "mean_cl_normal", geom="errorbar", size = 0.8, width=0, position=pd) +
+  stat_summary(fun.data = "mean_cl_normal", geom="point", size = 1.2, position=pd) +
+  
+  scale_color_manual(values = c('black','#F21A00','#E1AF00','#78B7C5','#3B9AB2'))+
+  
+  coord_cartesian(ylim=c(4,96),xlim=c(as.Date(c('2021-07-25','2021-12-01'))))+
+  
+  xlab("") +
+  ylab("Relative leaf chlorophyll content (%)") +
+  
+  ggtitle("Temperature treatments")+
+  
+  plotTheme1 +
+  theme(legend.position = "right")
+
+
+#Shade treatment
+Shade_curve = chlorophyll.data %>%
+  filter(!Treatment=="Temperature") %>%
+  mutate(time.period=as.factor(time.period)) %>%
+  ggplot(aes(x=date, y=chlorophyll.rel*100, colour=time.period, group=time.period)) +
+  
+  geom_hline(yintercept = 50, colour="lightgrey")+
+  geom_hline(yintercept = 10, colour="lightgrey")+
+  geom_hline(yintercept = 90, colour="lightgrey")+
+  
+  geom_vline(xintercept = as.Date('2021-11-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-10-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-09-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-08-01'), colour="lightgrey")+
+  
+  stat_summary(fun.data = "mean_cl_normal", geom="line", size = 1.2, position=pd, alpha=0.7) +
+  stat_summary(fun.data = "mean_cl_normal", geom="errorbar", size = 0.8, width=0, position=pd) +
+  stat_summary(fun.data = "mean_cl_normal", geom="point", size = 1.2, position=pd) +
+  
+  scale_color_manual(values = c('black','#F21A00','#E1AF00','#78B7C5','#3B9AB2'))+
+  
+  coord_cartesian(ylim=c(4,96),xlim=c(as.Date(c('2021-07-25','2021-12-01'))))+
+  
+  xlab("Date") +
+  ylab("Relative leaf chlorophyll content (%)") +
+  
+  ggtitle("Shade treatments")+
+  
+  plotTheme1 +
+  theme(legend.position = "none")
+
+
+#define plot layout
+layout <- "
+A
+B"
+
+#Merge plots
+CurvePlot = Temperature_curve + Shade_curve + plot_layout(design = layout) + plot_annotation(tag_levels = 'a')&
+  theme(plot.tag = element_text(face = 'bold'))
+
+#Save PDF
+pdf(paste(output.dir,"ChlorophyllCurvePlot.pdf",sep="/"), width=7, height=7, useDingbats=FALSE)
+CurvePlot
+dev.off()
+
+CurvePlot
+```
+
+</details>
+
+<details><summary>plot 3: Chlorophyll curves (Individuals)</summary>
+
+```{r, fig.width = 10, fig.asp = 1.62, fig.align = "center"}
+################################
+# Relative chlorophyll content #
+################################
+
+
+Chlorophyll_individuals = chlorophyll.data %>%
+  ggplot(aes(x=date, y=chlorophyll.rel*100, 
+             colour=Group, fill=Group)) +
+  
+  geom_vline(xintercept = as.Date('2021-11-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-10-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-09-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-08-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-07-01'), colour="lightgrey")+
+  
+  geom_hline(yintercept = 50, colour="black")+
+  geom_hline(yintercept = 10, colour="lightgrey")+
+  geom_hline(yintercept = 90, colour="lightgrey")+
+  
+  geom_line(aes(x=date, y=chlorophyll.rel*100), color="black")+
+  geom_point()+
+  geom_area(aes(x=date, y=chlorophyll.rel*100), alpha=0.5) +
+  
+  geom_vline(data=senescence.data[senescence.data$phenophase=="EOS10",], 
+             aes(xintercept = EOS), linetype = "dashed")+
+  geom_vline(data=senescence.data[senescence.data$phenophase=="EOS50",], 
+             aes(xintercept = EOS), linetype = "dashed", color="blue")+
+  
+  coord_cartesian(ylim=c(4,110),xlim=c(as.Date(c('2021-06-20','2021-12-01'))))+
+  
+  xlab("Date") +
+  ylab("Relative leaf chlorophyll content (%)") +
+  
+  facet_wrap(~ID, dir="v", nrow=15)+
+  plotTheme1
+
+#Save PDF
+pdf(paste(output.dir,"IndividualPlot_ChlRel.pdf",sep="/"), width=25, height=25, useDingbats=FALSE)
+Chlorophyll_individuals
+dev.off()
+
+Chlorophyll_individuals
+```
+
+</details>
+
+<br>
+
+## 5. Reproducibility
+
+</details>
+
+<details><summary>Reproducibility info</summary>
+
+```{r}
+## date time
+Sys.time()
+
+## session info
+sessionInfo()
+```
+
+</details>
+
+

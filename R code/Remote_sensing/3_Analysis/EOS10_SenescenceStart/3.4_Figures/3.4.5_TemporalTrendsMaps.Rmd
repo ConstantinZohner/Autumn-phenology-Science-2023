@@ -1,0 +1,571 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 31, 2023"
+
+subtitle: Maps of temporal trends (Figure S14)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S14: Temporal trends in (A) pre-solstice gross primary productivity [GPP], (C) senescence onset (EOS10) dates, (E) mid-senescence (EOS50) dates, (G) senescence duration (EOS10-to-EOS50) and (I) autumn temperature at 0.25° resolution for the 2001—2018 period
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(gmodels)
+require(lme4)
+require(car)
+require(sjmisc)
+require(wesanderson)
+require(patchwork)
+require(broom)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2")
+
+# paths
+Drivers_path     = "Remote_sensing/Analysis/Analysis_input/Drivers_final_EOS10/Merged_file"
+EOS50_path       = "Remote_sensing/Analysis/Analysis_input/Drivers_final_EOS50/Merged_file"
+output_path      = "Remote_sensing/Analysis/Analysis_output_startSen/TemporalTrendsMaps"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#EOS10 data
+Pheno.df <- fread(paste(Drivers_path, "Remote_sensing_drivers_data_startSen_preseason.csv", sep="/")) %>%
+  mutate(GPPstart.LO.SO = GPPstart.LO.SO*0.1,
+         AutumnTday     = rowMeans(dplyr::select(.,`Tday9`,`Tday10`))) 
+
+#EOS50 data
+EOS50.df <- fread(paste(EOS50_path, "Remote_sensing_drivers_data_preseason.csv", sep="/"))%>%
+  dplyr::select(c(geometry, Year, MidGreendown_DOY, Tday))
+
+#Merge
+Pheno.df = merge(Pheno.df, EOS50.df, by=c("geometry", "Year")) %>%
+  mutate(EOS50_EOS10 = MidGreendown_DOY-Senesc_DOY)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(color="black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(hjust=0.5))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+###################################
+## Run pixel-level linear models ##
+###################################
+
+
+
+Model.df = Pheno.df %>%
+  group_by(geometry, Lat, Lon) %>%
+  do({
+    
+    #run model
+    ##########
+    
+    model1 = lm(GPPstart.LO.SO   ~ Year, data=.)
+    model2 = lm(Greenup_DOY      ~ Year, data=.)
+    model3 = lm(Tday.y           ~ Year, data=.)
+    model4 = lm(Senesc_DOY       ~ Year, data=.)
+    model5 = lm(MidGreendown_DOY ~ Year, data=.)
+    model6 = lm(EOS50_EOS10      ~ Year, data=.)
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(rbind(
+      tidy(model1) %>% mutate(model = "GPP"),
+      tidy(model2) %>% mutate(model = "Greenup"),
+      tidy(model3) %>% mutate(model = "AutumnTday"),
+      tidy(model4) %>% mutate(model = "EOS10"),
+      tidy(model5) %>% mutate(model = "EOS50"),
+      tidy(model6) %>% mutate(model = "EOSduration")
+      ))
+  }) %>%
+  #delete intercept
+  filter(!term %in% c("(Intercept)")) 
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Create maps ##
+#################
+
+
+
+#Get world map
+mp <- NULL
+mapWorld <- borders("world", colour="gray40", fill="gray40") # create a layer of borders
+
+#---------------------------------------------------------------------------------------
+
+#Add GPP info
+#############
+
+mapGPP = 
+  Model.df %>%
+  filter(model == "GPP") %>%
+  mutate(estimate = ifelse(estimate > 10, 10, 
+                            ifelse(estimate < -10, -10, estimate))) %>%
+  ggplot() + mapWorld + plotTheme1 +
+  geom_tile(show.legend=T,
+               aes(x = Lon, y = Lat, fill=estimate)) +
+  scale_fill_gradient2(midpoint=0, 
+                       low='#3B9AB2', 
+                       mid="white",  
+                       high='#F21A00', 
+                       space ="Lab" ) +
+  coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+  xlab("") + ylab('Latitude') +
+  ggtitle("Pre-solstice GPP")+
+  theme(legend.position = c(0.08,0.33),
+        panel.background = element_rect(fill = "grey1", colour = NA),
+        legend.text=element_text(color="white"))
+
+#---------------------------------------------------------------------------------------
+
+#Add Greenup info
+#################
+
+mapGreenup = Model.df %>%
+  filter(model == "Greenup") %>%
+  mutate(estimate = ifelse(estimate > 1.5, 1.5, 
+                            ifelse(estimate < -1.5, -1.5, estimate))) %>%
+  ggplot() + mapWorld + plotTheme1 +
+  geom_tile(show.legend=T, aes(x = Lon, y = Lat, fill=estimate)) +
+  scale_fill_gradient2(midpoint=0, 
+                       low='#3B9AB2', 
+                       mid="white",  
+                       high='#F21A00', 
+                       space ="Lab" ) +
+  coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+  xlab("") + ylab('Latitude') +
+  ggtitle("Spring leaf-out")+
+  theme(legend.position = c(0.08,0.33),
+        panel.background = element_rect(fill = "grey1", colour = NA),
+        legend.text=element_text(color="white"))
+
+#---------------------------------------------------------------------------------------
+
+#Add autumn temperature info
+############################
+
+mapAutumn = Model.df %>%
+  filter(model == "AutumnTday") %>%
+  mutate(estimate = ifelse(estimate > .2, .2, 
+                           ifelse(estimate < -.2, -.2, estimate))) %>%
+  ggplot() + mapWorld + plotTheme1 +
+  geom_tile(show.legend=T, aes(x = Lon, y = Lat, fill=estimate)) +
+  scale_fill_gradient2(midpoint=0, 
+                       low='#3B9AB2', 
+                       mid="white",  
+                       high='#F21A00', 
+                       space ="Lab" ) +
+  coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+  xlab("") + ylab('Latitude') +
+  ggtitle("Autumn temperature")+
+  theme(legend.position = c(0.08,0.33),
+        panel.background = element_rect(fill = "grey1", colour = NA),
+        legend.text=element_text(color="white"))
+
+#---------------------------------------------------------------------------------------
+
+#Add EOS10 info
+###############
+
+mapEOS10 = Model.df %>%
+  filter(model == "EOS10") %>%
+  mutate(estimate = ifelse(estimate > .8, .8, 
+                           ifelse(estimate < -.8, -.8, estimate))) %>%
+  ggplot() + mapWorld + plotTheme1 +
+  geom_tile(show.legend=T, aes(x = Lon, y = Lat, fill=estimate)) +
+  scale_fill_gradient2(midpoint=0, 
+                       low='#3B9AB2', 
+                       mid="white",  
+                       high='#F21A00', 
+                       space ="Lab" ) +
+  coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+  xlab("") + ylab('Latitude') +
+  ggtitle(expression(Senescence~onset~(EOS[10])))+
+  theme(legend.position = c(0.08,0.33),
+        panel.background = element_rect(fill = "grey1", colour = NA),
+        legend.text=element_text(color="white"))
+
+#---------------------------------------------------------------------------------------
+
+#Add EOS50 info
+###############
+
+mapEOS50 = Model.df %>%
+  filter(model == "EOS50") %>%
+  mutate(estimate = ifelse(estimate > .8, .8, 
+                           ifelse(estimate < -.8, -.8, estimate))) %>%
+  ggplot() + mapWorld + plotTheme1 +
+  geom_tile(show.legend=T, aes(x = Lon, y = Lat, fill=estimate)) +
+  scale_fill_gradient2(midpoint=0, 
+                       low='#3B9AB2', 
+                       mid="white",  
+                       high='#F21A00', 
+                       space ="Lab" ) +
+  coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+  xlab("") + ylab('Latitude') +
+  ggtitle(expression("Mid-senescence"~(EOS[50])))+
+  theme(legend.position = c(0.08,0.33),
+        panel.background = element_rect(fill = "grey1", colour = NA),
+        legend.text=element_text(color="white"))
+
+#---------------------------------------------------------------------------------------
+
+#Add EOS duration info
+######################
+
+mapEOSduration = Model.df %>%
+  filter(model == "EOSduration") %>%
+  mutate(estimate = ifelse(estimate > 1.2, 1.2, 
+                           ifelse(estimate < -1.2, -1.2, estimate))) %>%
+  ggplot() + mapWorld + plotTheme1 +
+  geom_tile(show.legend=T, aes(x = Lon, y = Lat, fill=estimate)) +
+  scale_fill_gradient2(midpoint=0, 
+                       low='#3B9AB2', 
+                       mid="white",  
+                       high='#F21A00', 
+                       space ="Lab" ) +
+  coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+  xlab("") + ylab('Latitude') +
+  ggtitle(expression(Senescence~duration~(EOS[50]-EOS[10])))+
+  theme(legend.position = c(0.08,0.33),
+        panel.background = element_rect(fill = "grey1", colour = NA),
+        legend.text=element_text(color="white"))
+
+
+
+#############################################################################
+
+
+
+###################
+# Latitudinal plots
+###################
+
+
+
+LatPlotGPP = Model.df %>%
+  filter(model == "GPP") %>%
+  mutate(LatRound = round(Lat)) %>%
+  group_by(term, LatRound) %>%
+  summarise(mean   = mean(estimate),
+            lowCI  = ci(estimate)[2],
+            highCI = ci(estimate)[3]) %>% 
+  ggplot(aes(x = LatRound, y = mean, group=term, color=term, group=term)) + 
+  geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA, alpha=0.4)+
+  geom_line()+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values = c('#F21A00'))+
+  scale_fill_manual(values  = c('#F21A00'))+
+  ylab(expression(gC~m^2~year^-1)) +
+  coord_flip(ylim = c(-10, 10),xlim=c(27,75))+
+  plotTheme1 +
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+
+#---------------------------------------------------------------------------------------
+
+LatPlotGreenup = Model.df %>%
+  filter(model == "Greenup") %>%
+  mutate(LatRound = round(Lat)) %>%
+  group_by(term, LatRound) %>%
+  summarise(mean   = mean(estimate),
+            lowCI  = ci(estimate)[2],
+            highCI = ci(estimate)[3]) %>% 
+  ggplot(aes(x = LatRound, y = mean, group=term, color=term, group=term)) + 
+  geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA, alpha=0.4)+
+  geom_line()+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values = c('#3B9AB2'))+
+  scale_fill_manual(values = c('#3B9AB2'))+
+  ylab("days per year") +
+  coord_flip(ylim = c(-1, 1),xlim=c(27,75))+
+  plotTheme1 +
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+
+#---------------------------------------------------------------------------------------
+
+LatPlotAutumn = Model.df %>%
+  filter(model == "AutumnTday") %>%
+  mutate(LatRound = round(Lat)) %>%
+  group_by(term, LatRound) %>%
+  summarise(mean   = mean(estimate),
+            lowCI  = ci(estimate)[2],
+            highCI = ci(estimate)[3]) %>% 
+  ggplot(aes(x = LatRound, y = mean, group=term, color=term, group=term)) + 
+  geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA, alpha=0.4)+
+  geom_line()+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values = c('#F21A00'))+
+  scale_fill_manual(values = c('#F21A00'))+
+  ylab("??C per year") +
+  coord_flip(ylim = c(-.12, .12),xlim=c(27,75))+
+  plotTheme1 +
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+
+#---------------------------------------------------------------------------------------
+
+LatPlotEOS10 = Model.df %>%
+  filter(model == "EOS10") %>%
+  mutate(LatRound = round(Lat)) %>%
+  group_by(term, LatRound) %>%
+  summarise(mean   = mean(estimate),
+            lowCI  = ci(estimate)[2],
+            highCI = ci(estimate)[3]) %>% 
+  ggplot(aes(x = LatRound, y = mean, group=term, color=term, group=term)) + 
+  geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA, alpha=0.4)+
+  geom_line()+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values = c('#3B9AB2'))+
+  scale_fill_manual(values = c('#3B9AB2'))+
+  ylab("days per year") +
+  coord_flip(ylim = c(-.3, .3),xlim=c(27,75))+
+  plotTheme1 +
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+
+#---------------------------------------------------------------------------------------
+
+LatPlotEOS50 = Model.df %>%
+  filter(model == "EOS50") %>%
+  mutate(LatRound = round(Lat)) %>%
+  group_by(term, LatRound) %>%
+  summarise(mean   = mean(estimate),
+            lowCI  = ci(estimate)[2],
+            highCI = ci(estimate)[3]) %>% 
+  ggplot(aes(x = LatRound, y = mean, group=term, color=term, group=term)) + 
+  geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA, alpha=0.4)+
+  geom_line()+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values = c('#F21A00'))+
+  scale_fill_manual(values = c('#F21A00'))+
+  ylab("days per year") +
+  coord_flip(ylim = c(-.3, .3),xlim=c(27,75))+
+  plotTheme1 +
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+
+#---------------------------------------------------------------------------------------
+
+LatPlotEOSduration = Model.df %>%
+  filter(model == "EOSduration") %>%
+  mutate(LatRound = round(Lat)) %>%
+  group_by(term, LatRound) %>%
+  summarise(mean   = mean(estimate),
+            lowCI  = ci(estimate)[2],
+            highCI = ci(estimate)[3]) %>% 
+  ggplot(aes(x = LatRound, y = mean, group=term, color=term, group=term)) + 
+  geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA, alpha=0.4)+
+  geom_line()+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values = c('#F21A00'))+
+  scale_fill_manual(values = c('#F21A00'))+
+  ylab("days per year") +
+  coord_flip(ylim = c(-.5, .5),xlim=c(27,75))+
+  plotTheme1 +
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank())
+
+
+
+#############################################################################
+
+
+
+################
+# Correlations #
+################
+
+
+
+#filter and long format
+Model.df.wide = Model.df%>%
+  dplyr::select(c(estimate, model)) %>%
+  filter(!Lat>62) %>%
+  pivot_wider(., names_from = model, names_sep = ".", values_from = estimate) 
+
+#GPP trend versus EOS10 trend
+GPP_EOS10 = ggplot(Model.df.wide, aes(x=GPP, y=EOS10)) +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  geom_smooth(method=lm, color='#3B9AB2')+
+  coord_cartesian(xlim = c(quantile(Model.df.wide$GPP,probs=0.01), quantile(Model.df.wide$GPP,probs=0.99)),
+                  ylim = c(-0.4,0.4)) +
+  xlab(expression("Pre-solstice GPP trend"~(gC~m^-2~yr^-1))) +
+  ylab(expression(EOS[10]~trend~(days~yr^-1))) +
+  plotTheme1 
+
+#Autumn Tday trend versus EOS50 trend
+AutumnTemp_EOS50 = ggplot(Model.df.wide, aes(x=AutumnTday, y=EOS50)) +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  geom_smooth(method=lm, color='#F21A00') +
+  coord_cartesian(xlim = c(quantile(Model.df.wide$AutumnTday,probs=0.01), quantile(Model.df.wide$AutumnTday,probs=0.99)),
+                  ylim = c(-0.4,0.4)) +
+  xlab(expression(Autumn~temperature~trend~(degree*C~yr^-1))) +
+  ylab(expression(EOS[50]~trend~(days~yr^-1))) +
+  plotTheme1 
+
+#Autumn Tday trend versus EOS duration trend
+AutumnTemp_EOSduration = ggplot(Model.df.wide, aes(x=AutumnTday, y=EOSduration)) +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  geom_smooth(method=lm, color='#F21A00') +
+  coord_cartesian(xlim = c(quantile(Model.df.wide$AutumnTday,probs=0.01), quantile(Model.df.wide$AutumnTday,probs=0.99)),
+                  ylim = c(-0.4,0.4)) +
+  xlab(expression(Autumn~temperature~trend~(degree*C~yr^-1))) +
+  ylab(expression(Senescence~duration~trend~(days~yr^-1))) +
+  plotTheme1 
+
+
+
+#############################################################################
+
+
+
+#############
+# All plots #
+#############
+
+
+#define plot layout
+layout <- "
+AAAAAB
+CCCCCD
+EEEEEF
+GGGGGH
+IIIIIJ
+KKLLMM"
+
+#Merge plots
+All_Plot = 
+  mapGPP         + LatPlotGPP + 
+  mapEOS10       + LatPlotEOS10 +
+  mapEOS50       + LatPlotEOS50 +
+  mapEOSduration + LatPlotEOSduration +
+  mapAutumn      + LatPlotAutumn +
+  
+  GPP_EOS10 + AutumnTemp_EOS50 + AutumnTemp_EOSduration +
+  
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'a') &
+  theme(plot.tag = element_text(face = 'bold'))
+
+#save plots as .pdf
+ggsave(All_Plot, file="FigS14_All_temporal_changes.pdf", 
+       path=output_path,
+       width=12, height=3*6.1)
+
+All_Plot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## datetime
+Sys.time()
+
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```
+</details>

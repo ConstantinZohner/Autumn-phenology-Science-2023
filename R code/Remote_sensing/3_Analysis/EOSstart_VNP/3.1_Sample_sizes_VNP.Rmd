@@ -1,0 +1,131 @@
+---
+title: "Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice"
+subtitle: "Satellite data (VNP): sample size check"
+---
+
+<br><br>
+
+## 1. Load packages and data
+
+<details><summary>get packages</summary>
+```{r}
+require(data.table)
+require(ggplot2)
+require(tidyverse)
+require(raster)
+require(viridis)
+
+
+#plot theme
+plotTheme1 = theme(
+  legend.position   = "top",
+  legend.background = element_rect(fill=NA, size=0.5, linetype="solid"),
+  legend.text       = element_text(color="black"),
+  panel.grid.major  = element_line(colour = "lightgrey"), 
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold"))
+```
+</details>
+
+<details><summary>get data</summary>
+```{r}
+## set working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Remote_sensing/Analysis")
+# paths
+Drivers_path = "Analysis_input/Drivers_final_onset_VNP/Merged_file"
+Land_cover_path  = "Analysis_input/Drivers"
+
+## Import data
+Pheno.df     <- fread(paste(Drivers_path, "Remote_sensing_drivers_data_onset_VNP.csv", sep="/"))
+
+LandCover.df <- fread(paste(Land_cover_path, "Land_Cover_Type_025.csv", sep="/")) %>%
+  mutate(geometry = gsub("POINT ","",  geometry),
+         geometry = gsub("\\(|\\)","", geometry)) %>%
+  separate(geometry, into = c("Lon","Lat"), sep=" ") %>%
+  mutate(Lat = as.numeric(Lat),
+         Lon = as.numeric(Lon)) 
+```
+</details>
+
+<br>
+
+## 2. Data cleaning
+<details><summary>show code</summary>
+```{r}
+Pheno.df = Pheno.df %>%
+  mutate(Year = as.numeric(Year)) %>% 
+  group_by(geometry) %>%
+  #delete pixels with fewer than 9 years
+  filter(n() >= 9) %>%
+  ungroup() %>%
+  dplyr::select(-c(V1)) %>%
+  left_join(LandCover.df, by=c("Lat","Lon")) %>%
+  #delete evergreen broadleaf pixels
+  filter(!LC_Type == "EvgB")
+```
+</details>
+
+<br>
+
+## 3. Check sample sizes
+<details><summary>show code</summary>
+```{r}
+#total observations
+nrow(Pheno.df)
+
+#how many sites in total?
+length(unique(Pheno.df$geometry))
+
+#time span 
+range(Pheno.df$Year)
+hist(Pheno.df$Year, xlab="Year", main="Temporal distribution of data", col='lightblue', breaks=10)
+
+#latitudinal gradient 
+range(Pheno.df$Lat)
+hist(Pheno.df$Lat, xlab="Latitude", main="Latitudinal gradient", col='lightblue')
+
+#Land cover types
+Pheno.df.unique = Pheno.df %>% distinct(geometry, .keep_all = T)
+barplot(table(Pheno.df.unique$LC_Type))
+table(Pheno.df.unique$LC_Type)
+
+#leaf-out data
+mean(Pheno.df$Onset_Greenness_Increase)
+sd(Pheno.df$Onset_Greenness_Increase)
+range(Pheno.df$Onset_Greenness_Increase)
+hist(Pheno.df$Onset_Greenness_Increase, xlab="Leaf-out date", main="Leaf-out gradient", col='lightblue')
+
+#leaf-off data
+mean(Pheno.df$Onset_Greenness_Decrease)
+sd(Pheno.df$Onset_Greenness_Decrease)
+quantile(Pheno.df$Onset_Greenness_Decrease, probs=c(0.05, 0.5, 0.95))
+range(Pheno.df$Onset_Greenness_Decrease)
+hist(Pheno.df$Onset_Greenness_Decrease, xlab="Senescence date", main="Senescence gradient", col='lightblue')
+
+#Create summary dataframe by time series
+n.years = Pheno.df %>%
+  group_by(geometry) %>%
+  summarise(count = n())
+mean(n.years$count)
+max(n.years$count)
+min(n.years$count)
+
+#Map the observations
+mp <- NULL
+mapWorld <- borders("world", colour="gray60", fill="gray60") # create a layer of borders
+mp <- ggplot() + mapWorld + plotTheme1
+
+#Now Layer the stations on top
+mp <- mp + geom_tile(data = Pheno.df, 
+                       aes(x = Lon, y = Lat, fill=LC_Type)) +
+  scale_fill_viridis_d(option = "D") +
+  coord_cartesian(ylim = c(20, 70)) +
+  xlab("") + ylab('') 
+mp
+```
+</details>

@@ -1,0 +1,236 @@
+---
+title: "Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice"
+subtitle: "R code to download, format, and clean the PEP725 data"
+---
+
+<br><br>
+
+## 1. Load packages and set directories
+
+<details><summary>get packages</summary>
+```{r}
+require(devtools)
+require(phenor)
+require(data.table)
+require(reshape2)
+require(dplyr)
+require(ggplot2)
+require(data.table)
+require(maptools)
+require(maps)
+```
+</details>
+
+<details><summary>set directories</summary>
+```{r}
+# set the working directory
+wd="/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/PEP_Analysis/Analysis/PEP_data"
+# paths
+tmp_path = paste(wd, "PEPzip", sep="/")
+PEPcsv_path = paste(wd, "PEPcsv", sep="/")
+```
+</details>
+
+<br>
+
+## 2. Download and merge PEP data	
+
+<details><summary>show code</summary>
+```{r}
+## Download PEP data from website
+
+# load or download necessary data
+# [create a proper pep725login.txt file first]
+#check manually for errors. These are 1) umlauts and 2) missing phenology file info
+#download_pep725(credentials = "PEPcredentials/PEPcredentials.txt",
+#                species= check_pep725_species(list = TRUE)$number,#download everything
+#                internal = F,
+#                path = tmp_path)
+
+#merge PEP files into one csv (check errors first)
+tidy_pep_data = merge_pep725(path=tmp_path)
+```
+</details>
+
+<br>
+
+## 3. Format and clean PEP data
+
+<details><summary>show code</summary>
+```{r, warning=F, message=F}
+#keep only leaf-out and leaf senescence observations
+tidy_pep_data = tidy_pep_data %>%
+  filter(bbch %in% c("10","11","13","94","95")) %>% 
+  mutate(day=as.numeric(day))
+
+#check observed phenophases
+barplot(table(tidy_pep_data$bbch), las=2)
+
+#reshape table to short format (each bbch gets separate column)
+tidy_pep_data = dcast(tidy_pep_data, pep_id+year+country+species+lat+lon+alt ~ bbch, value.var = "day")
+
+#Check correlation between BBCH94 and BBCH95
+paste0("Pearson's r = ", round(cor.test(tidy_pep_data$`94`,tidy_pep_data$`95`)$estimate,2))
+paste0("R2 = ", round(summary(lm(tidy_pep_data$`94`~tidy_pep_data$`95`))$r.squared,2))
+
+#how many site x year combinations have both BBCH94 and BBCH95 dates?
+nrow(tidy_pep_data %>% filter(!is.na(`94`), 
+                              !is.na(`95`)))
+
+#Plot correlation
+ggplot(data=tidy_pep_data, aes(y= `94`, x= `95`)) + 
+  geom_hex(bins=200)+
+  scale_fill_gradient2(low="grey95",mid='#E1AF00',"high"='#F21A00', midpoint=350)+
+  geom_smooth(method="lm", color='black') +
+  coord_cartesian(ylim = c(200,360), xlim = c(200,360))+
+  labs(x = 'BBCH95', y = 'BBCH94')+
+  theme_classic()
+
+#table operations
+tidy_pep_data = tidy_pep_data %>%
+  #rename bbch columns
+  rename(leaf_out10 = "10", leaf_out11 = "11", leaf_out13 = "13", 
+         leaf_off94 = "94", leaf_off95 = "95") %>%
+  
+  #keep only individuals that have leaf-out and leaf-off information
+  filter(complete.cases(leaf_off94 | leaf_off95)) %>%
+  filter(complete.cases(leaf_out10 | leaf_out11 | leaf_out13)) %>%
+  #keep only years after 1950
+  filter(year>1950) %>% 
+  
+  #create one leaf-out column (prefer bbch 10 for larix, bbch 11 for all other species)
+  mutate(leaf_out = ifelse(species == "Larix decidua" & complete.cases(leaf_out10), leaf_out10, 
+                           ifelse(species == "Larix decidua" & complete.cases(leaf_out11), leaf_out11, 
+                                  ifelse(species == "Larix decidua" & complete.cases(leaf_out13), leaf_out13, 
+                                         ifelse(species != "Larix decidua" & complete.cases(leaf_out11), leaf_out11, 
+                                                ifelse(species != "Larix decidua" & complete.cases(leaf_out13), leaf_out13, leaf_out10)))))) %>%
+  #group by species and site
+  group_by(species, pep_id) %>% 
+  
+  #create leaf-off column: which is the most common autumn bbch within each time series?
+  mutate(classifier = ifelse(sum(!is.na(leaf_off94)) < sum(!is.na(leaf_off95)), 
+                             "useBBCH95", "useBBCH94"),
+         leaf_off = ifelse(classifier=="useBBCH94", leaf_off94, leaf_off95)) %>% 
+  
+  #delete NAs
+  filter(!is.na(leaf_off)) %>% 
+  
+  #Data cleaning
+  ##############
+  #delete dates deviating from median more than 4 times MAD
+  filter(!(abs(leaf_off-median(leaf_off))>4*mad(leaf_off) | 
+             abs(leaf_out-median(leaf_out, na.rm=T))>4*mad(leaf_out, na.rm=T))) %>% 
+  #delete time-series with standard deviation of leaf-off dates > 25
+  filter(!(sd(leaf_off, na.rm=T)>25 | sd(leaf_out, na.rm=T)>20)) %>% 
+  #delete time series with less than 15 years
+  filter(n() >= 15) %>% 
+  
+  mutate(
+    #add mean leaf-out date
+    leaf_out_mean = round(mean(leaf_out)),
+    #add mean leaf-off date
+    leaf_off_mean = round(mean(leaf_off))) %>%
+  ungroup() %>% 
+  
+  #delete species with less than 35 time series
+  group_by(species) %>%
+  filter(length(unique(pep_id)) >= 35) %>%
+  ungroup() %>% 
+  
+  mutate(
+    #rename species
+    species = case_when(species == "Aesculus hippocastanum" ~ "Aesculus",
+                        species == "Betula(Betula pendula_(B._verrucosa|_B._alba))" ~ "Betula pen.",
+                        species == "Betula(Betula pubescens)" ~ "Betula pub.",
+                        species == "Fagus(Fagus sylvatica)" ~ "Fagus",
+                        species == "Larix decidua" ~ "Larix",
+                        species == "Quercus robur_(Q.peduncula)" ~ "Quercus",
+                        species == "Sorbus aucuparia" ~ "Sorbus",
+                        species == "Tilia(Tilia cordata)" ~ "Tilia",
+                        species == "Vitis vinifera" ~ "Vitis"),
+    #add timeseries identifier
+    timeseries = paste0(pep_id, "_", species)) %>%
+  
+  #delete columns
+  select(-c(leaf_out10, leaf_out11, leaf_out13, leaf_off94, leaf_off95))#delete columns
+
+#Safe table
+#write.csv(tidy_pep_data, paste(wd, "PEPcsv/pepData.csv", sep="/"))
+
+check.BBCH = tidy_pep_data %>% 
+  distinct(pep_id, species, .keep_all = T)
+
+table(check.BBCH$classifier)/nrow(check.BBCH)*100
+```
+</details>
+
+<br>
+
+## 4. Sample sizes
+
+<details><summary>show code</summary>
+```{r}
+#total observations
+nrow(tidy_pep_data)
+
+#how many species have data?
+length(unique(tidy_pep_data$species))
+
+#how many sites in total?
+length(unique(tidy_pep_data$pep_id))
+
+#time span 
+range(tidy_pep_data$year)
+hist(tidy_pep_data$year, xlab="Year", main="Temporal distribution of data")
+
+#latitudinal gradient 
+range(tidy_pep_data$lat)
+hist(tidy_pep_data$lat, xlab="Latitude", main="Latitudinal gradient")
+
+#elevational gradient 
+range(tidy_pep_data$alt)
+hist(tidy_pep_data$alt, xlab="Elevation (m)", main="Elevational gradient")
+
+#leaf-out data
+mean(tidy_pep_data$leaf_out)
+sd(tidy_pep_data$leaf_out)
+range(tidy_pep_data$leaf_out)
+hist(tidy_pep_data$leaf_out, xlab="Leaf-out date", main="Leaf-out gradient")
+
+#leaf-off data
+mean(tidy_pep_data$leaf_off)
+sd(tidy_pep_data$leaf_off)
+range(tidy_pep_data$leaf_off)
+hist(tidy_pep_data$leaf_off, xlab="Senescence date", main="Senescence gradient")
+
+#Create summary dataframe
+sample.size = tidy_pep_data %>%
+  group_by(species) %>%
+  summarize(n.time.series = length(unique(pep_id)),
+            n.observations = n())
+
+#Sample sizes within species
+data.frame(sample.size)
+
+#Total amount of times series
+sum(sample.size$n.time.series)
+
+#Bar Plot 
+sample.size = melt(sample.size, id.vars = c("species"), measure.vars = c("n.time.series","n.observations"))
+ggplot(sample.size, aes(x=species, y=value)) + 
+  geom_bar(stat = "identity")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  facet_wrap(~variable, nrow=2, scales="free_y")
+
+#Map the observations
+mp <- NULL
+mapWorld <- borders("world", colour="gray60", fill="gray60") # create a layer of borders
+mp <- ggplot() + mapWorld
+
+#Now Layer the stations on top
+mp <- mp + geom_point(data=tidy_pep_data[!duplicated(tidy_pep_data[ , c("lat", "lon")]), ], 
+                      aes(x=lon, y=lat) ,color="blue", size=.3) +
+  coord_cartesian(ylim = c(43, 69), xlim = c(-10, 31))
+mp
+```
+</details>

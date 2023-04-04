@@ -1,0 +1,511 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 29, 2023"
+
+subtitle: Ground-sourced American phenology observations - Harvard data (Fig. S4)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Variable names
+- Tmean 1-12...monthly mean temperatures
+- Tpre...Pre-solstice (May-June) temperature
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(pracma)
+require(broom.mixed)
+require(lme4)
+require(lubridate)
+require(patchwork)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Harvard_analysis")
+
+# paths
+drivers_path    = "Harvard_forest_data"
+output_path     = "R_output"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+# Phenology data
+################
+
+Pheno.df <- fread(paste(drivers_path, "hf003-07-fall-mean-ind.csv", sep="/")) %>% 
+  # delete Rosaceae
+  filter(!species %in% c("PRSE","AMSP"),
+         !is.na(lc.doy)) %>%
+  # get genus info
+  mutate(genus = stringr::str_extract(species, "^.{2}")) %>% 
+  # remove time series with fewer than 28 years of observations
+  group_by(tree.id) %>% 
+  filter(n() >= 28) %>% 
+  ungroup() %>%
+  # delete species with fewer than 2 time series
+  group_by(species) %>% 
+  filter(!length(unique(tree.id))<2) %>% 
+  ungroup()
+
+
+# Temperature data
+##################
+
+Temp.df  <- fread(paste(drivers_path, "hf300-05-daily-m.csv", sep="/")) %>% 
+  # extract month and year info
+  mutate(month = month(date),
+         year  = year(date)) %>%
+  # calculate monthly temperatures
+  group_by(year, month) %>% 
+  summarise(Tmean = mean(airt, na.rm=T)) %>% 
+  ungroup() %>% 
+  #wide format
+  pivot_wider(., names_from = month, values_from = Tmean) %>% 
+  rename_at(vars(c(2:13)), ~paste0("Tmean",c(1:12))) %>% 
+  # calculate pre-solstice (May-June) temperature
+  rowwise() %>% 
+  mutate(Tpre=mean(c(Tmean4,Tmean5,Tmean6)))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+################
+## Plot theme ##
+################
+
+
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black',face = "italic"),
+  plot.title        = element_text(face="bold"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########################
+## VARIABLE EXPLANATION:
+########################
+
+
+
+# Phenology data
+################
+
+# year...observation year
+# tree.id...tree identifier
+# species...species name
+# lc.doy...50% leaf coloration date (DOY)
+# lf.doy...50% leaf fall date (DOY)
+
+
+# Species abbreviations
+#######################
+
+# ACPE: Acer pensylvanicum, striped maple
+# ACRU: Acer rubrum, red maple
+# ACSA: Acer saccharum, sugar maple
+# BEAL: Betula alleghaniensis, yellow birch
+# BELE: Betula lenta, blackbirch
+# FAGR: Fagus grandifolia, beech
+# NYSY: Nyssa sylvatica, blackgum
+# QUAL: Quercus alba, white oak
+# QURU: Quercus rubra, red oak
+# QUVE: Quercus velutina, black oak
+
+
+# Climate data
+##############
+
+# year...observation year
+# Tmean 1-12...monthly mean temperatures
+# Tpre...Pre-solstice (May-June) temperature
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+####################################
+# Merge phenology and climate data #
+####################################
+
+
+
+# Mixed model data
+##################
+
+Pheno.df = Pheno.df %>% 
+  left_join(., Temp.df, by="year")
+
+      
+# Partial regression data
+#########################
+
+Pheno.df2 = Pheno.df %>% 
+  group_by(genus,year) %>% 
+  summarise(lc.doy = mean(lc.doy)) %>% 
+  ungroup() %>% 
+  left_join(., Temp.df, by="year") %>% 
+  mutate(Tpost = ifelse(genus == "NY", Tmean8, Tmean9))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################################
+## Partial regression analysis ##
+#################################
+
+
+
+PartialReg.df = Pheno.df2 %>% 
+ 
+  #group by species
+  group_by(genus)%>%
+  
+  do({
+    
+    #run models
+    ###########
+    
+    #Equations
+    model.x     = lm(Tpre   ~ Tpost, data = .)
+    model.y     = lm(lc.doy ~ Tpost, data = .)
+   
+    residuals.x = resid(model.x)
+    residuals.y = resid(model.y)
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(resid.x = residuals.x,
+               resid.y = residuals.y)
+    
+  }) %>% ungroup()
+
+
+# Duplicate data
+################
+
+PartialReg.df = rbind(PartialReg.df, 
+                      PartialReg.df %>% mutate(genus="Aall")) %>%
+  mutate(genus = factor(genus, levels=c("Aall","NY","FA","QU","BE","AC")))
+
+
+# Create labels
+###############
+
+# This function returns a data frame with strings representing the regression equation, and the r^2 value.
+lm_labels <- function(dat) {
+  mod <- lm(resid.y ~ resid.x, data = dat)
+  formula <- sprintf("%.2f ~ days~C^-1",
+                     round(coef(mod)[2], 1))
+  r <- cor(dat$resid.x, dat$resid.y)
+  r2 <- sprintf("italic(R^2) == %.2f", r^2)
+  data.frame(formula = formula, r2 = r2, stringsAsFactors = FALSE)
+}
+
+# Create label dataframe
+labels <- PartialReg.df %>%
+  group_by(genus) %>%
+  do(lm_labels(.))
+  
+
+# Plot
+######
+
+PartialReg.plot = ggplot() +
+  geom_smooth(data=PartialReg.df, aes(x = resid.x, y = resid.y),
+              method = 'lm', color = '#F21A00', fill="#F21A00") +
+  geom_point(data=PartialReg.df, aes(x = resid.x, y = resid.y), size=1) + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  theme(plot.subtitle = element_text(hjust = 0.5)) +
+  xlab(expression(Delta~"Pre-solstice"~T[mean]~"(" * degree * C *")")) +
+  ylab(expression(Delta~EOS[50]~(days)))+
+  coord_cartesian(ylim=c(-8.5,7.5))+
+  facet_wrap(~genus, ncol=1, strip.position = "right",
+             labeller = as_labeller(c("FA" = "Fagus", "BE" = "Betula", "Aall"="All", "NY" = "Nyssa", "QU"="Quercus", "AC"="Acer")))+
+  geom_text(data = labels, aes(label = formula), x = 0.6, y = 4.5, parse = TRUE, hjust = 0, size=3.5) +
+  geom_text(x = 0.6, y = 7, aes(label = r2), data = labels, parse = TRUE, hjust = 0, size=3.5)+
+  plotTheme1
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################################################
+## Monthly correlations (Mixed effects models) ##
+#################################################
+
+
+
+# All species
+#############
+
+ModelResults.df = Pheno.df %>%
+    
+  do({
+      
+    #run models
+    ###########
+      
+    #Equation
+    modelEq = lmer(scale(lc.doy) ~ scale(Tmean3) + scale(Tmean4) + scale(Tmean5) + scale(Tmean6) +
+                      scale(Tmean7) + scale(Tmean8) + scale(Tmean9) + scale(Tmean10) + 
+                      (1|tree.id) + (1|species) + (1|genus), data=.)
+      
+      
+      #create combined dataframe
+      ##########################
+      
+      data.frame(tidy(modelEq, effects="fixed"))  
+      
+    }) %>%
+    
+    #add species name 
+    mutate(genus  = 'Aall')
+  
+#----------------------------------------------------
+  
+# Genus-specific mixed effects models 
+#####################################
+  
+ModelResultsSpecies.df = Pheno.df %>%
+    
+  #group by species
+  group_by(genus)%>%
+    
+  do({
+    
+    #run models
+    ###########
+      
+    #Equation
+    modelEq = lmer(scale(lc.doy) ~ scale(Tmean3)+scale(Tmean4) + scale(Tmean5) + scale(Tmean6) +
+                     scale(Tmean7) + scale(Tmean8) + scale(Tmean9) + scale(Tmean10) + 
+                     (1|tree.id), data=.)
+      
+      #create combined dataframe
+      ##########################
+      
+      data.frame(tidy(modelEq, effects="fixed") )
+      
+    }) %>% ungroup()
+  
+  #rbind all species and genus-specific results
+  Results.df = bind_rows(ModelResults.df, ModelResultsSpecies.df) %>%
+    #delete intercept
+    filter(!term %in% c("(Intercept)")) %>% 
+    #add variable name and keep only numbers in month column 
+    mutate(term = readr::parse_number(term),
+           genus = factor(genus, levels=c("Aall","NY","FA","QU","BE","AC")))
+
+
+##############################################################################################################################################
+
+  
+# Interpolation of monthly estimates
+####################################
+  
+
+#Interpolation function
+lin_interp = function(x, y, length.out=100) {
+  approx(x, y, xout=seq(min(x), max(x), length.out=length.out))$y
+}
+  
+#create identifier
+genus = unique(Results.df$genus)
+  
+#create interpolation dataframe
+df.interp = data.frame()
+df.AUC = data.frame()
+  
+#loop over variable x equation x species vector
+for (variable.name in genus){
+    
+    #subset table
+    df.sub = Results.df  %>% 
+      filter(genus == variable.name)
+    
+    # Interpolate data
+    created.interp = lin_interp(df.sub$term, df.sub$term)
+    score.interp   = lin_interp(df.sub$term, df.sub$estimate)
+    df.interp.sub  = data.frame(created=created.interp, score=score.interp)
+    # Make a grouping variable for each pos/neg segment
+    cat.rle        = rle(df.interp.sub$score < 0)
+    df.interp.sub  = df.interp.sub %>%
+      mutate(group = rep.int(1:length(cat.rle$lengths),  times=cat.rle$lengths),
+             genus = unique(df.sub$genus) )
+    #rbind sub dataframes 
+    df.interp = rbind(df.interp, df.interp.sub)
+    
+    #get Area under curve (%)
+    df.AUC.sub = df.interp.sub %>%
+      mutate(positive = ifelse(score<0, 0, score),
+             negative = ifelse(score>0, 0, score))%>%
+      summarise(sum.pos = trapz(created, positive), 
+                sum.neg = abs(trapz(created, negative)))%>%
+      mutate(percent.neg = round(sum.neg/(sum.pos+sum.neg)*100),
+             percent.pos = round(sum.pos/(sum.pos+sum.neg)*100),
+             genus = unique(df.sub$genus) )
+    #rbind sub dataframes 
+    df.AUC = rbind(df.AUC, df.AUC.sub)
+  }  
+  
+
+##############################################################################################################################################
+
+
+# Plot
+######
+
+Monthly.plot = ggplot() + 
+    geom_area(data = df.interp, aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=Results.df, 
+               aes(x=term, y=estimate))+
+    geom_errorbar(data=Results.df, 
+                  aes(x=term, ymin=estimate-2*std.error, ymax=estimate+2*std.error), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC, 
+              mapping = aes(x = -Inf, y = Inf, hjust = -.1, vjust = 1.5,
+                            label = paste0(percent.neg,'% / ',percent.pos, '%')) ) +
+    xlab("")+ylab('Standardized effect')+
+    facet_wrap(~genus, scales="free_y", ncol=1)+
+    scale_x_continuous(breaks = seq(1,10,by=2),
+                       labels = c('Jan','Mar','May','Jul','Sep'))+
+    plotTheme1+
+    theme(strip.text.x     = element_blank())
+  
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+###############
+## Safe plot ##
+###############
+
+
+
+#define plot layout
+layout <- "AB"
+  
+#Merge plots
+Harvard_Plot =  Monthly.plot + PartialReg.plot +
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'a')&
+  theme(plot.tag = element_text(face = 'bold'))
+  
+#save plots as .pdf
+ggsave(Harvard_Plot, file="Harvard_results.pdf", path=output_path,
+       width=6, height=10.5)
+
+Harvard_Plot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## date time
+Sys.time()
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```

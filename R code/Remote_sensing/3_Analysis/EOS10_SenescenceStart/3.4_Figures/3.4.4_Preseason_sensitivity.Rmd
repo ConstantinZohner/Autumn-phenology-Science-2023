@@ -1,0 +1,511 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 31, 2023"
+
+subtitle: Autumn temperature sensitivity (Figure S18)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S18: The effect of autumn temperature on EOS10 (A), EOSstart (B), and EOS50 dates (C,D)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(broom)
+require(gmodels)
+require(patchwork)
+require(MASS)
+
+
+#define plot themes
+plotTheme1 = theme(legend.position   = "none",
+                   legend.background = element_rect(fill=NA, size=0.5, linetype="solid"),
+                   legend.text       = element_text(color="black"),
+                   panel.grid.major  = element_blank(),
+                   panel.grid.minor  = element_blank(),
+                   panel.background  = element_blank(),
+                   panel.border      = element_rect(colour = "black", fill=NA),
+                   axis.line         = element_line(color = "black"),
+                   axis.text         = element_text(colour = "black"),
+                   strip.background  = element_rect(fill=NA),
+                   strip.text        = element_text(colour = 'black'),
+                   plot.title        = element_text(face="bold"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##########################################
+## Set directories and get own PEP data ##
+##########################################
+
+
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2")
+
+# paths
+Drivers_path_PEP       = "PEP_analysis/Analysis/Analysis_input/PEP_drivers_final/Merged_file"
+Drivers_path_EOS10     = "Remote_sensing/Analysis/Analysis_input/Drivers_final_EOS10/Merged_file"
+Drivers_path_EOSstart  = "Remote_sensing/Analysis/Analysis_input/Drivers_final_onset_VNP/Merged_file"
+Drivers_path_EOS50     = "Remote_sensing/Analysis/Analysis_input/Drivers_final_EOS50/Merged_file"
+
+Land_cover_path        = "Remote_sensing/Analysis/Analysis_input/Drivers"
+output_path            = "Remote_sensing/Analysis/Analysis_output_startSen/Preseason_temperatures"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#Land cover info
+################
+
+LandCover.df <- fread(paste(Land_cover_path, "Land_Cover_Type_025.csv", sep="/")) %>%
+  mutate(geometry = gsub("POINT ","",  geometry),
+         geometry = gsub("\\(|\\)","", geometry)) %>%
+  separate(geometry, into = c("Lon","Lat"), sep=" ") %>%
+  mutate(Lat = round(as.numeric(Lat),3),
+         Lon = round(as.numeric(Lon),3) ) 
+
+
+#Local PEP725 data
+##################
+
+PEP.df <- fread(paste(Drivers_path_PEP, "pep_drivers_data.csv", sep="/"))%>% 
+  dplyr::select(-V1)
+
+
+#MODIS EOS50 data
+#################
+
+MODIS.EOS50.df <- fread(paste(Drivers_path_EOS50, "Remote_sensing_drivers_data.csv", sep="/"))%>% 
+  dplyr::select(-V1) %>%
+  #Add land cover type info
+  mutate(Year = as.numeric(Year)) %>%
+  inner_join(LandCover.df,  by=c("Lat","Lon")) %>%
+  #delete evergreen broadleaf pixels
+  filter(!LC_Type == "EvgB")
+
+
+#MODIS EOS10 data
+#################
+
+MODIS.EOS10.df <- fread(paste(Drivers_path_EOS10, "Remote_sensing_drivers_data_startSen.csv", sep="/"))%>% 
+  dplyr::select(-V1) %>%
+  filter(
+    #delete senescence dates before DOY 140 and after DOY 290
+    Senesc_DOY>140,Senesc_DOY<290,
+    #delete observation if senescence date occurs before MidGreenup date
+    Senesc_DOY>MidGreenup_DOY)%>%
+  group_by(geometry) %>%
+  #delete pixels with fewer than 15 years
+  filter(n() >= 15) %>%
+  ungroup() %>%
+  #Add land cover type info
+  mutate(Year = as.numeric(Year)) %>%
+  inner_join(LandCover.df,  by=c("Lat","Lon")) %>%
+  #delete evergreen broadleaf pixels
+  filter(!LC_Type == "EvgB")
+
+
+#MODIS EOS10 data
+#################
+
+MODIS.EOSstart.df <- fread(paste(Drivers_path_EOSstart, "Remote_sensing_drivers_data_onset_VNP.csv", sep="/"))%>% 
+  dplyr::select(-V1) %>% 
+  group_by(geometry) %>%
+  #delete pixels with fewer than 9 years
+  filter(n() >= 9) %>%
+  ungroup() %>%
+  #Add land cover type info
+  mutate(Year = as.numeric(Year)) %>%
+  inner_join(LandCover.df,  by=c("Lat","Lon")) %>%
+  #delete evergreen broadleaf pixels
+  filter(!LC_Type == "EvgB")
+
+
+rm(LandCover.df)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## PEP725 data ##
+#################
+
+
+
+#reshape table to long format
+#############################
+
+preseason.df = PEP.df %>%
+  #select columns
+  dplyr::select(timeseries,year,species,pep_id,leaf_off,
+                Tday.PS.10,Tday.PS.20,Tday.PS.30,
+                Tday.PS.40,Tday.PS.50,Tday.PS.60,
+                Tday.PS.70,Tday.PS.80,Tday.PS.90,
+                Tday.PS.100,Tday.PS.110,Tday.PS.120,
+                Tnight.PS.10,Tnight.PS.20,Tnight.PS.30,
+                Tnight.PS.40,Tnight.PS.50,Tnight.PS.60,
+                Tnight.PS.70,Tnight.PS.80,Tnight.PS.90,
+                Tnight.PS.100,Tnight.PS.110,Tnight.PS.120)%>%
+  #long format
+  pivot_longer(.,cols=starts_with(c("Td","Tn")), names_to = "preseason", values_to = "temp") %>%
+  #create preseason length and temperature class columns
+  mutate(preseason_length = readr::parse_number(gsub("[.]", "", preseason)), #keep only numbers in string
+         temp_class = gsub("\\..*","", preseason)) %>%
+  dplyr::select(-preseason)
+
+
+#Run linear models
+##################
+
+results.PEP = preseason.df %>% 
+  group_by(timeseries, species, pep_id, temp_class, preseason_length) %>% 
+  do({model = lm(scale(leaf_off) ~ scale(temp), data=.)  # linear model
+  data.frame(tidy(model),         # coefficient info
+             glance(model))}) %>% # model info
+  filter(!term %in% c("(Intercept)")) %>%
+  dplyr::select(timeseries,species,pep_id,temp_class,preseason_length,estimate,r.squared)%>%
+  ungroup()
+
+
+#Plot correlation coefficients
+##############################
+
+plot.PEP = results.PEP %>%
+  ggplot()+
+  aes(x=preseason_length, y=estimate, 
+      colour=temp_class, group=temp_class) +
+  
+  geom_hline(yintercept=0)+
+  
+  stat_summary(fun = mean, geom="line", size = .7) +
+  scale_colour_manual(values = c('#F21A00', '#3B9AB2')) +
+  stat_summary(fun.data = "mean_cl_normal", geom="errorbar", size = 0.5, width=0) +
+  stat_summary(fun.data = "mean_cl_normal", geom="point", size = .7) +
+  scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+  xlab("Preseason length (days)") +
+  ylab("") +
+  coord_cartesian(ylim = c(-.36, 0.36))+
+  facet_wrap(~species, ncol=1, strip.position = "right") +
+  plotTheme1+
+  theme(strip.text.y = element_text(face="italic"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+######################
+## MODIS EOS50 data ##
+######################
+
+
+
+#reshape table to long format
+#############################
+
+preseason.df = MODIS.EOS50.df %>%
+  #select columns
+  dplyr::select(geometry,Year,LC_Type,MidGreendown_DOY,
+                Tday.PS.10,Tday.PS.20,Tday.PS.30,
+                Tday.PS.40,Tday.PS.50,Tday.PS.60,
+                Tday.PS.70,Tday.PS.80,Tday.PS.90,
+                Tday.PS.100,Tday.PS.110,Tday.PS.120,
+                Tnight.PS.10,Tnight.PS.20,Tnight.PS.30,
+                Tnight.PS.40,Tnight.PS.50,Tnight.PS.60,
+                Tnight.PS.70,Tnight.PS.80,Tnight.PS.90,
+                Tnight.PS.100,Tnight.PS.110,Tnight.PS.120)%>%
+  #long format
+  pivot_longer(.,cols=starts_with(c("Td","Tn")), names_to = "preseason", values_to = "temp") %>%
+  #create preseason length and temperature class columns
+  mutate(preseason_length = readr::parse_number(gsub("[.]", "", preseason)), #keep only numbers in string
+         temp_class = gsub("\\..*","", preseason)) %>%
+  dplyr::select(-preseason)
+
+
+#Run linear models
+##################
+
+results.MODIS.EOS50 = preseason.df %>% 
+  group_by(geometry, LC_Type, temp_class, preseason_length) %>% 
+  do({model = lm(scale(MidGreendown_DOY) ~ scale(temp), data=.)  # linear model
+  data.frame(tidy(model),         # coefficient info
+             glance(model))}) %>% # model info
+  filter(!term %in% c("(Intercept)")) %>%
+  dplyr::select(geometry,LC_Type,temp_class,preseason_length,estimate,r.squared)%>%
+  ungroup()
+
+
+#Plot correlation coefficients
+##############################
+
+plot.MODIS.EOS50 = results.MODIS.EOS50 %>%
+  mutate(LC_Type = factor(LC_Type, levels=c("Mixed","DecB","EvgN","DecN"), ordered=T)) %>%
+  ggplot()+
+  aes(x=preseason_length, y=estimate, 
+      colour=temp_class) +
+  
+  geom_hline(yintercept=0)+
+  
+  stat_summary(fun = mean, geom="line", size = .7) +
+  scale_colour_manual(values = c('#F21A00', '#3B9AB2')) +
+  
+  stat_summary(fun.data = "mean_cl_normal", geom="errorbar", size = 0.5, width=0) +
+  stat_summary(fun.data = "mean_cl_normal", geom="point", size = .7) +
+  scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+  
+  xlab("Preseason length (days)") +
+  ylab("") +
+  coord_cartesian(ylim = c(-.36, 0.36))+
+  facet_wrap(~LC_Type, ncol=1, strip.position = "right") +
+  plotTheme1
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+######################
+## MODIS EOS10 data ##
+######################
+
+
+
+#reshape table to long format
+#############################
+
+preseason.df = MODIS.EOS10.df %>%
+  #select columns
+  dplyr::select(geometry,Year,LC_Type,Senesc_DOY,
+                Tday.PS.10,Tday.PS.20,Tday.PS.30,
+                Tday.PS.40,Tday.PS.50,Tday.PS.60,
+                Tday.PS.70,Tday.PS.80,Tday.PS.90,
+                Tday.PS.100,Tday.PS.110,Tday.PS.120,
+                Tnight.PS.10,Tnight.PS.20,Tnight.PS.30,
+                Tnight.PS.40,Tnight.PS.50,Tnight.PS.60,
+                Tnight.PS.70,Tnight.PS.80,Tnight.PS.90,
+                Tnight.PS.100,Tnight.PS.110,Tnight.PS.120)%>%
+  #long format
+  pivot_longer(.,cols=starts_with(c("Td","Tn")), names_to = "preseason", values_to = "temp") %>%
+  #create preseason length and temperature class columns
+  mutate(preseason_length = readr::parse_number(gsub("[.]", "", preseason)), #keep only numbers in string
+         temp_class = gsub("\\..*","", preseason)) %>%
+  dplyr::select(-preseason)
+
+
+#Run linear models
+##################
+
+results.MODIS.EOS10 = preseason.df %>% 
+  group_by(geometry, LC_Type, temp_class, preseason_length) %>% 
+  do({model = lm(scale(Senesc_DOY) ~ scale(temp), data=.)  # linear model
+  data.frame(tidy(model),         # coefficient info
+             glance(model))}) %>% # model info
+  filter(!term %in% c("(Intercept)")) %>%
+  dplyr::select(geometry,LC_Type,temp_class,preseason_length,estimate,r.squared)%>%
+  ungroup()
+
+
+#Plot correlation coefficients
+##############################
+
+plot.MODIS.EOS10 = results.MODIS.EOS10 %>%
+  mutate(LC_Type = factor(LC_Type, levels=c("Mixed","DecB","EvgN","DecN"), ordered=T)) %>%
+  ggplot()+
+  aes(x=preseason_length, y=estimate, 
+      colour=temp_class) +
+  
+  geom_hline(yintercept=0)+
+  
+  stat_summary(fun = mean, geom="line", size = .7) +
+  scale_colour_manual(values = c('#F21A00', '#3B9AB2')) +
+  
+  stat_summary(fun.data = "mean_cl_normal", geom="errorbar", size = 0.5, width=0) +
+  stat_summary(fun.data = "mean_cl_normal", geom="point", size = .7) +
+  scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+  
+  xlab("Preseason length (days)") +
+  ylab("Standardized coefficient") +
+  coord_cartesian(ylim = c(-.36, 0.36))+
+  facet_wrap(~LC_Type, ncol=1, strip.position = "right") +
+  plotTheme1
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#########################
+## MODIS EOSstart data ##
+#########################
+
+
+
+#reshape table to long format
+#############################
+
+preseason.df = MODIS.EOSstart.df %>%
+  #select columns
+  dplyr::select(geometry,Year,LC_Type,Onset_Greenness_Decrease,
+                Tday.PS.10,Tday.PS.20,Tday.PS.30,
+                Tday.PS.40,Tday.PS.50,Tday.PS.60,
+                Tday.PS.70,Tday.PS.80,Tday.PS.90,
+                Tday.PS.100,Tday.PS.110,Tday.PS.120,
+                Tnight.PS.10,Tnight.PS.20,Tnight.PS.30,
+                Tnight.PS.40,Tnight.PS.50,Tnight.PS.60,
+                Tnight.PS.70,Tnight.PS.80,Tnight.PS.90,
+                Tnight.PS.100,Tnight.PS.110,Tnight.PS.120)%>%
+  #long format
+  pivot_longer(.,cols=starts_with(c("Td","Tn")), names_to = "preseason", values_to = "temp") %>%
+  #create preseason length and temperature class columns
+  mutate(preseason_length = readr::parse_number(gsub("[.]", "", preseason)), #keep only numbers in string
+         temp_class = gsub("\\..*","", preseason)) %>%
+  dplyr::select(-preseason)
+
+
+#Run linear models
+##################
+
+results.MODIS.EOSstart = preseason.df %>% 
+  group_by(geometry, LC_Type, temp_class, preseason_length) %>% 
+  do({model = lm(scale(Onset_Greenness_Decrease) ~ scale(temp), data=.)  # linear model
+  data.frame(tidy(model),         # coefficient info
+             glance(model))}) %>% # model info
+  filter(!term %in% c("(Intercept)")) %>%
+  dplyr::select(geometry,LC_Type,temp_class,preseason_length,estimate,r.squared)%>%
+  ungroup()
+
+
+#Plot correlation coefficients
+##############################
+
+plot.MODIS.EOSstart = results.MODIS.EOSstart %>%
+  mutate(LC_Type = factor(LC_Type, levels=c("Mixed","DecB","EvgN","DecN"), ordered=T)) %>%
+  ggplot()+
+  aes(x=preseason_length, y=estimate, 
+      colour=temp_class) +
+  
+  geom_hline(yintercept=0)+
+  
+  stat_summary(fun = mean, geom="line", size = .7) +
+  scale_colour_manual(values = c('#F21A00', '#3B9AB2')) +
+  
+  stat_summary(fun.data = "mean_cl_normal", geom="errorbar", size = 0.5, width=0) +
+  stat_summary(fun.data = "mean_cl_normal", geom="point", size = .7) +
+  scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+  
+  xlab("Preseason length (days)") +
+  ylab("") +
+  coord_cartesian(ylim = c(-.36, 0.36))+
+  facet_wrap(~LC_Type, ncol=1, strip.position = "right") +
+  plotTheme1
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##########################
+# Arrange and safe plots #
+##########################
+
+
+
+#define plot layout
+layout <- "ABCD"
+
+#Merge plots
+PreseasonPlot = plot.MODIS.EOS10 + plot.MODIS.EOSstart + plot.MODIS.EOS50 + plot.PEP + 
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'A')&
+  theme(plot.tag = element_text(face = 'bold'))
+
+#Safe plot
+pdf(paste(output_path,"FigS18_Preseason_sensitivity_all.pdf",sep="/"), width=9, height=7, useDingbats=FALSE)
+PreseasonPlot
+dev.off()
+
+PreseasonPlot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## datetime
+Sys.time()
+
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```
+</details>

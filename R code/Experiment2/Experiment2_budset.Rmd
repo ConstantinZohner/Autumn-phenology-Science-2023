@@ -1,0 +1,550 @@
+---
+title: "Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice"
+subtitle: "Experiment 2: The seasonal effects of temperature on autumn bud set"
+---
+  
+<br><br>
+  
+## 1. Load packages and functions
+  
+<details><summary>load packages</summary>
+  
+```{r, message=FALSE, warning=FALSE}
+require(ggplot2)
+require(tidyverse)
+require(broom.mixed)
+require(patchwork)
+require(lubridate)
+require(data.table)
+require(gmodels)
+require(wesanderson)
+require(mgcv)
+require(tm)
+require(lme4)
+```
+
+</details>
+  
+<details><summary>load functions</summary>
+  
+```{r, message=FALSE, warning=FALSE}
+```
+
+</details>
+  
+<br>
+  
+## 2. Load data
+  
+<details>
+  
+<summary>data tables</summary>
+  
+```{r}
+################
+# define paths #
+################
+
+
+data.dir   = "/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Experiment2/Data"
+output.dir = "/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Experiment2/R_output"
+
+
+
+#####################
+# Load bud set data #
+#####################
+
+
+bud.df = read.table(paste(data.dir,"bud_measurements_rm_2022.csv",sep="/"), header=T, sep=",") %>% 
+  
+  #create ID and treatment columns
+  mutate(ID=readr::parse_number(TreeID), #keep only numbers in string
+         TreatmentLetter=removeNumbers(TreeID),#remove numbers in string
+         date = as.Date(date, format="%d.%m.%y", origin = "1970-01-01"),
+         #merge controls
+         Treatment = ifelse(TreatmentLetter %in% c("A","D","H"),"Control",
+                            ifelse(TreatmentLetter %in% c("G"),"Pre", 
+                                   ifelse(TreatmentLetter %in% c("K"), "Post", "Other")))) %>% 
+  
+  #long format
+  pivot_longer(., -c(TreeID, ID, Treatment, TreatmentLetter, Week, date), 
+               names_to = "bud_type", values_to = "bud_length") %>% 
+  mutate(bud_type = gsub("\\..*","", bud_type)) %>% 
+  filter(!Treatment %in% c('Other'),
+         !is.na(bud_length)) %>% 
+  group_by(ID, bud_type) %>% 
+  filter(n() >= 8) %>% 
+  ungroup()
+```
+
+</details><details><summary>ggplot themes</summary>
+  
+```{r}
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_rect(fill=NA, size=0.5, linetype="solid"),
+  legend.text       = element_text(color="black"),
+  panel.background  = element_blank(),
+  axis.text         = element_text(colour = "black"),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold",hjust = 0.5))
+```
+
+</details>
+  
+<br>
+  
+## 3. Prepare and analyze bud set data
+  
+<details><summary>Sample sizes</summary>
+  
+```{r}
+# Observed buds per treatment
+table(bud.df[bud.df$date=="2022-09-01",]$Treatment, bud.df[bud.df$date=="2022-09-01",]$bud_type)
+
+# Number of individual trees
+length(unique(bud.df$ID))
+
+# Number of individual trees per treatment
+length(unique(bud.df[bud.df$Treatment=="Control",]$ID))
+length(unique(bud.df[bud.df$Treatment=="Pre",]$ID))
+length(unique(bud.df[bud.df$Treatment=="Post",]$ID))
+```
+
+</details>
+  
+<details><summary>Data preparation</summary>
+  
+```{r, warning=F, message=F}
+##########################
+## Get relative bud growth
+##########################
+
+
+bud.df = bud.df %>%
+  group_by(ID, bud_type)%>%
+  mutate(
+    #get relative bud length per individual
+    bud.rel = bud_length / max(bud_length),
+    #get bud growth rates per individual
+    across(bud_length, ~c(NA, diff(.)), .names = "bud_growth"),
+    #get relative bud growth rates per individual
+    across(bud.rel, ~c(NA, diff(.)), .names = "relbud_growth"),
+    #get date of maximum bud length per individual
+    date.max.bud = date[which.max(bud_length)]) %>%
+  ungroup()
+
+
+
+######################################################################
+## Interpolate 90% bud set dates from seasonal bud length measurements
+######################################################################
+
+
+bud.data.90 = bud.df %>%
+  group_by(ID, Treatment, bud_type) %>%
+  filter(!(ID %in% c(116) & bud_type == 'Apical'),
+         !(ID %in% c(58) & bud_type == 'Lateral')) %>% 
+  # Find the last row with <90% bud length in each group, keep only this row and next
+  filter(row_number() <= min(which(bud.rel > 0.9)),
+         row_number() >= min(which(bud.rel > 0.9))-1) %>%
+  #Linear interpolation
+  summarize(EOS     = as.Date(approx(bud.rel, date, .9,  ties=min)$y, origin="1970-01-01")) %>%
+  mutate(EOS.DOY    = yday(EOS)) %>%
+  ungroup()
+
+mean(bud.data.90$EOS)
+```
+
+</details>
+  
+<details><summary>Bud set analysis</summary>
+  
+```{r,warning=F, message=F}
+################
+## Linear models
+################
+
+
+# Bud set dates
+###############
+
+resultsLM = bud.data.90 %>% 
+  do({model = lmer(EOS.DOY ~ Treatment + (1|bud_type), data=.)  # create your model
+  data.frame(tidy(model, effect="fixed"))}) %>%
+  filter(!term %in% c("(Intercept)")) %>% 
+  mutate(term = factor(term, levels = c("TreatmentPre","TreatmentPost")),
+         #Reverse effect sizes
+         estimate = estimate*(-1))
+
+#Show results
+as.data.frame(resultsLM) %>%
+  dplyr::select(-c(statistic))%>%
+  mutate_if(is.numeric, round, digits=1)
+
+
+# Autumn bud growth rates
+#########################
+
+resultsRelGrowth = bud.df %>% 
+  do({model = lmer(relbud_growth*100/7 ~ Treatment + (1|bud_type) + (1|date), data=.)  # create your model
+  data.frame(tidy(model, effect="fixed"))}) %>% 
+  filter(!term %in% c("(Intercept)")) %>% 
+  mutate(term = factor(term, levels = c("TreatmentPre","TreatmentPost")),
+         #Reverse effect sizes
+         estimate = estimate*(-1))
+
+#Show results
+as.data.frame(resultsRelGrowth) %>%
+  dplyr::select(-c(statistic))%>%
+  mutate_if(is.numeric, round, digits=2)
+
+
+# Autumn bud growth
+###################
+
+BudGrowth.df = bud.df %>% 
+  group_by(Treatment, ID, bud_type) %>% 
+  summarize(RelAutGrowth = (1-(min(bud_length)/max(bud_length)))*100) %>% 
+  ungroup()
+
+resultsRelAutGrowth = BudGrowth.df %>% 
+  do({model = lmer(RelAutGrowth ~ Treatment + (1|bud_type), data=.)
+  data.frame(tidy(model, effect="fixed"))})
+
+#Show results
+Intercept = resultsRelAutGrowth[1,]$estimate
+as.data.frame(resultsRelAutGrowth) %>%
+  #get relative autumn growth change
+  mutate(PercentGrowthChange = estimate/Intercept*100,
+         PercentGrowth.se = std.error/Intercept*100) %>% 
+  dplyr::select(-c(statistic))%>%
+  mutate_if(is.numeric, round, digits=1)
+```
+
+</details>
+  
+<br>
+  
+## 4. Figures
+  
+</details>
+  
+<details><summary>plot 1: Linear models</summary>
+  
+```{r, fig.align = "center"}
+# Bud set dates
+###############
+
+LMplot90 = ggplot() + 
+  scale_color_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_hline(yintercept=0)+
+  geom_point(data=resultsLM, aes(x=term, y=estimate, color=term))+
+  geom_errorbar(data=resultsLM, 
+                aes(x=term, ymin=estimate+1.96*std.error, ymax=estimate-1.96*std.error, color=term), 
+                width=.2, position=position_dodge(.9)) +
+  
+  geom_vline(xintercept=1.5, size=2, alpha=0.4)+
+  coord_cartesian(ylim=c(-10,10))+
+  xlab("")+ylab("Bud set anomaly (days)")+
+  scale_x_discrete(labels = c('Pre','Post'))+
+  plotTheme1
+
+LMplot90
+
+# Relative bud growth rates
+LMplotRelGrowth = ggplot() + 
+  scale_color_manual(values = c('#F21A00', '#3B9AB2'))+
+  geom_hline(yintercept=0)+
+  geom_point(data=resultsRelGrowth, aes(x=term, y=estimate, color=term))+
+  geom_errorbar(data=resultsRelGrowth, 
+                aes(x=term, ymin=estimate-1.96*std.error, ymax=estimate+1.96*std.error, color=term), 
+                width=.2, position=position_dodge(.9)) +
+  
+  geom_vline(xintercept=1.5, size=2, alpha=0.4)+
+  coord_cartesian(ylim=c(-0.12,.12))+
+  xlab("")+ylab("Bud growth rate anomaly (% per day)")+
+  scale_x_discrete(labels = c('Pre','Post'))+
+  plotTheme1 
+
+LMplotRelGrowth 
+```
+
+</details>
+  
+<details><summary>plot 2: Bud length curves</summary>
+  
+```{r, fig.align = "center", warning=F, message=F}
+#move points .05 to the left and right
+pd = position_dodge(2) 
+
+
+# Relative bud growth
+RelBudLength_curve = bud.df %>%
+  mutate(Treatment = factor(Treatment, levels=c("Control",'Pre','Post'))) %>% 
+  ggplot(aes(x=date, y=bud.rel*100, colour=Treatment, group=Treatment)) +
+  
+  geom_hline(yintercept = 60, colour="lightgrey")+
+  geom_hline(yintercept = 70, colour="lightgrey")+
+  geom_hline(yintercept = 80, colour="lightgrey")+
+  geom_hline(yintercept = 90, colour="lightgrey")+
+  geom_hline(yintercept = 100, colour="lightgrey")+
+  
+  geom_vline(xintercept = as.Date('2022-11-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2022-10-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2022-09-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2022-08-01'), colour="lightgrey")+
+  
+  stat_summary(fun.data = "mean_se", geom="line", size = 1.2, position=pd, alpha=0.7) +
+  stat_summary(fun.data = "mean_se", geom="errorbar", size = 0.8, width=0, position=pd) +
+  stat_summary(fun.data = "mean_se", geom="point", size = 1.2, position=pd) +
+  
+  scale_color_manual(values = c('black','#F21A00','#3B9AB2'), 
+                     labels=c('Control', 'Pre-solstice cooling',"Post-solstice cooling"))+
+  
+  coord_cartesian(ylim=c(65,100),xlim=c(as.Date(c('2022-08-25','2022-11-05'))))+
+  
+  xlab("") +
+  ylab("Relative bud length (%)") +
+  
+  #ggtitle("Relative bud growth")+
+  
+  plotTheme1 +
+  theme(legend.position       = c(0.7, 0.3),
+        legend.key            = element_rect(fill = "transparent"),
+        legend.background     = element_rect(fill='white'),
+        legend.box.background = element_rect(fill='transparent'),
+        axis.title.x          = element_blank(),
+        axis.text.x           = element_blank())
+
+RelBudLength_curve
+
+# Absolute bud growth
+AbsBudLength_curve = bud.df %>%
+    mutate(Treatment = factor(Treatment, levels=c("Control",'Pre','Post'))) %>% 
+    ggplot(aes(x=date, y=bud_length, colour=Treatment, group=Treatment)) +
+    
+    geom_hline(yintercept = 12.5, colour="lightgrey")+
+    geom_hline(yintercept = 15, colour="lightgrey")+
+    geom_hline(yintercept = 17.5, colour="lightgrey")+
+    geom_hline(yintercept = 20, colour="lightgrey")+
+    geom_hline(yintercept = 22.5, colour="lightgrey")+
+    geom_hline(yintercept = 25, colour="lightgrey")+
+    
+    geom_vline(xintercept = as.Date('2022-11-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-10-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-09-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-08-01'), colour="lightgrey")+
+    
+    stat_summary(fun.data = "mean_se", geom="line", size = 1.2, position=pd, alpha=0.7) +
+    stat_summary(fun.data = "mean_se", geom="errorbar", size = 0.8, width=0, position=pd) +
+    stat_summary(fun.data = "mean_se", geom="point", size = 1.2, position=pd) +
+    
+    scale_color_manual(values = c('black','#F21A00','#3B9AB2'))+
+    
+    coord_cartesian(ylim=c(13,24),xlim=c(as.Date(c('2022-08-25','2022-11-05'))))+
+    
+    xlab("Date") +
+    ylab("Bud length (mm)") +
+    
+    #ggtitle("Absolute bud growth") +
+    
+    plotTheme1 
+
+AbsBudLength_curve
+
+# Relative bud growth rate
+RelBudGrowth_curve = bud.df %>%
+    ggplot(aes(x=date, y=relbud_growth*100/7, colour=Treatment, group=Treatment)) +
+    
+    geom_hline(yintercept = 0.25, colour="lightgrey")+
+    geom_hline(yintercept = 0.5, colour="lightgrey")+
+    geom_hline(yintercept = 0.75, colour="lightgrey")+
+    geom_hline(yintercept = 1, colour="lightgrey")+
+    
+    geom_vline(xintercept = as.Date('2022-11-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-10-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-09-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-08-01'), colour="lightgrey")+
+    
+    stat_summary(fun.data = "mean_se", geom="line", size = 1.2, position=pd, alpha=0.7) +
+    stat_summary(fun.data = "mean_se", geom="errorbar", size = 0.8, width=0, position=pd) +
+    stat_summary(fun.data = "mean_se", geom="point", size = 1.2, position=pd) +
+    
+    scale_color_manual(values = c('black','#F21A00','#3B9AB2'))+
+    
+    coord_cartesian(ylim=c(0.056,1.2),xlim=c(as.Date(c('2022-08-25','2022-11-05'))))+
+    
+    xlab("") +
+    ylab("% per day") +
+    
+    #ggtitle("Bud growth rate")+
+    
+    plotTheme1 +
+    theme(legend.position = "right")
+  
+RelBudGrowth_curve
+
+# Absolute bud growth
+AbsBudGrowth_curve = bud.df %>%
+    ggplot(aes(x=date, y=bud_growth/7, colour=Treatment, group=Treatment)) +
+    
+    geom_hline(yintercept = .1, colour="lightgrey")+
+    geom_hline(yintercept = .2, colour="lightgrey")+
+    geom_hline(yintercept = .3, colour="lightgrey")+
+    
+    geom_vline(xintercept = as.Date('2022-11-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-10-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-09-01'), colour="lightgrey")+
+    geom_vline(xintercept = as.Date('2022-08-01'), colour="lightgrey")+
+    
+    stat_summary(fun.data = "mean_se", geom="line", size = 1.2, position=pd, alpha=0.7) +
+    stat_summary(fun.data = "mean_se", geom="errorbar", size = 0.8, width=0, position=pd) +
+    stat_summary(fun.data = "mean_se", geom="point", size = 1.2, position=pd) +
+    
+    scale_color_manual(values = c('black','#F21A00','#3B9AB2'))+
+    
+    coord_cartesian(ylim=c(0.011,0.25),xlim=c(as.Date(c('2022-08-25','2022-11-05'))))+
+    
+    xlab("") +
+    ylab("mm per day") +
+    
+    #ggtitle("Absolute bud growth")+
+    
+    plotTheme1 +
+    theme(legend.position = "right")
+  
+AbsBudGrowth_curve
+
+#define plot layout
+layout <- "
+ACC
+BDD"
+
+#Merge plots
+CombinedPlot = LMplot90 + LMplotRelGrowth + RelBudLength_curve + AbsBudLength_curve +
+  plot_layout(design = layout) + plot_annotation(tag_levels = c('A')) &
+  theme(plot.tag = element_text(face = 'bold'))
+
+#Save PDF
+pdf(paste(output.dir,"CombinedPlot_Experiment2.pdf",sep="/"), width=6.5, height=6.5, useDingbats=FALSE)
+CombinedPlot 
+dev.off()
+
+CombinedPlot 
+```
+
+</details>
+  
+<details><summary>plot 3: Bud set curves (Individuals)</summary>
+  
+```{r, fig.width = 5, fig.asp = 20, fig.align = "center", warning=F, message=F}
+##############
+# Bud length #
+##############
+
+
+budlength_individuals = bud.df %>%
+  ggplot(aes(x=date, y=bud_length, 
+             colour=Treatment, fill=Treatment)) +
+  
+  geom_vline(xintercept = as.Date('2021-11-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-10-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-09-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-08-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-07-01'), colour="lightgrey")+
+  
+  geom_hline(yintercept = 10, colour="lightgrey")+
+  geom_hline(yintercept = 20, colour="lightgrey")+
+  geom_hline(yintercept = 30, colour="lightgrey")+
+  
+  geom_line(aes(x=date, y=bud_length), color="black")+
+  geom_point()+
+  geom_area(aes(x=date, y=bud_length), alpha=0.5) +
+  
+  geom_vline(data=bud.data.90, 
+             aes(xintercept = EOS), linetype = "dashed")+
+  
+  xlab("Date") +
+  ylab("Bud length (mm)") +
+  
+  facet_grid(ID~bud_type)+
+  plotTheme1
+
+#Save PDF
+pdf(paste(output.dir,"IndividualPlot_Budlength.pdf",sep="/"), width=6, height=120, useDingbats=FALSE)
+budlength_individuals
+dev.off()
+
+budlength_individuals
+
+#######################
+# Relative bud length #
+#######################
+
+
+RelBudlength_individuals = bud.df %>%
+  ggplot(aes(x=date, y=bud.rel*100, 
+             colour=Treatment, fill=Treatment)) +
+  
+  geom_vline(xintercept = as.Date('2021-11-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-10-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-09-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-08-01'), colour="lightgrey")+
+  geom_vline(xintercept = as.Date('2021-07-01'), colour="lightgrey")+
+  
+  geom_hline(yintercept = 50, colour="lightgrey")+
+  geom_hline(yintercept = 60, colour="lightgrey")+
+  geom_hline(yintercept = 70, colour="lightgrey")+
+  geom_hline(yintercept = 80, colour="lightgrey")+
+  geom_hline(yintercept = 90, colour="lightgrey")+
+  
+  geom_line(aes(x=date, y=bud.rel*100), color="black")+
+  geom_point()+
+  geom_area(aes(x=date, y=bud.rel*100), alpha=0.5) +
+  
+  geom_vline(data=bud.data.90, 
+             aes(xintercept = EOS), linetype = "dashed")+
+  
+  coord_cartesian(ylim=c(45,100))+
+  
+  xlab("Date") +
+  ylab("Relative bud length (%)") +
+  
+  facet_grid(ID~bud_type)+
+  plotTheme1
+
+#Save PDF
+pdf(paste(output.dir,"IndividualPlot_RelativeBudlength.pdf",sep="/"), width=6, height=120, useDingbats=FALSE)
+RelBudlength_individuals
+dev.off()
+
+RelBudlength_individuals
+```
+
+</details>
+  
+<br>
+  
+## 5. Reproducibility
+  
+</details>
+  
+<details><summary>Reproducibility info</summary>
+  
+```{r}
+## date time
+Sys.time()
+
+## session info
+sessionInfo()
+```
+
+</details>
+  
+  
+  

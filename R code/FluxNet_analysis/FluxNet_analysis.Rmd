@@ -1,0 +1,737 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 29, 2023"
+
+subtitle: FluxNet analysis (Figs. S5 and S6)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Variable names
+- GPP: GPP (day-time method)
+- PD10: Date of 10% photosynthesis decline
+- PD25: Date of 25% photosynthesis decline
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+#####################
+# Required packages #
+#####################
+
+
+
+require(data.table)
+require(tidyverse)
+require(lme4)
+require(broom)
+require(broom.mixed)
+require(pracma)
+require(effects)
+require(remef)
+require(wesanderson)
+require(patchwork)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#############################
+## Set directory and paths ##
+#############################
+
+
+
+# Set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/FluxNet_analysis/Analysis")
+
+
+#########
+# Paths #
+#########
+
+
+# 1. Input
+##########
+
+input_path = "Fluxnet_data"
+
+
+# 2. Output
+###########
+
+output_path = "Figures"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#Flux data
+Flux.df <- fread(paste(input_path, "fluxnet_phenology_roll7_df.csv", sep="/")) %>% 
+  group_by(SiteName) %>% 
+  #delete sites with fewer than 10 years
+  filter(n() >= 10) %>%
+  ungroup()
+
+
+#Site data
+Site.df <- fread(paste(input_path, "sites_biomes_continents_rm.csv", sep="/"))
+
+
+#Merge
+Flux.df = merge(Flux.df, Site.df, by=c("SiteName")) %>% 
+  filter(!forest_type %in% c("EN"),
+         !biome == 6) %>% 
+  # sum of April-June photosynthesis
+  mutate(GPP.LO.SO = rowSums(dplyr::select(.,c("GPP_4","GPP_5","GPP_6"))))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+####################################################
+## Check sample sizes, EOS dates and forest types ##
+####################################################
+
+
+
+# Observations per site
+table(Flux.df$SiteName)
+length(table(Flux.df$SiteName))
+
+# EOS dates
+quantile(Flux.df$pd10, c(0.05, 0.5, 0.95))
+quantile(Flux.df$pd25, c(0.05, 0.5, 0.95))
+quantile(Flux.df$pd50, c(0.05, 0.5, 0.95))
+
+# Forest types
+table(Flux.df$forest_type)
+table(Flux.df$`biome name`)
+
+# Years
+range(Flux.df$YEAR)
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+################
+## Plot theme ##
+################
+
+
+#Color.palette:  col=c('#F21A00','#E1AF00','#EBCC2A','#78B7C5','#3B9AB2')
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################################################################
+#get advance in PD10/25 per each 10% increase in pre-solstice GPP
+#################################################################
+
+
+
+# mixed model
+coefficients10 = coef(summary(lmer(pd10 ~ GPP.LO.SO + (1 | SiteName), data=Flux.df,
+                                   na.action = "na.exclude")))[2,1:2]
+
+coefficients25 = coef(summary(lmer(pd25 ~ GPP.LO.SO + (1 | SiteName), data=Flux.df,
+                                   na.action = "na.exclude")))[2,1:2]
+
+#relative to overall variation
+paste0("PD10 = ", 
+       round(coefficients10[1] * (max(Flux.df$GPP.LO.SO)-min(Flux.df$GPP.LO.SO))/10,1),
+       " ± ",
+       round(coefficients10[2] * (max(Flux.df$GPP.LO.SO)-min(Flux.df$GPP.LO.SO))/10,1),
+       " days per 10% GPP")
+paste0("PD25 = ", 
+       round(coefficients25[1] * (max(Flux.df$GPP.LO.SO)-min(Flux.df$GPP.LO.SO))/10,1),
+       " ± ",
+       round(coefficients25[2] * (max(Flux.df$GPP.LO.SO)-min(Flux.df$GPP.LO.SO))/10,1),
+       " days per 10% GPP")
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##########################################
+# Univariate monthly mixed effects model #
+##########################################
+
+
+
+#Prepare data
+#############
+
+
+# Models
+########
+
+#list variables to loop through
+variables   = c('GPP')
+phenophases = c("pd10", "pd25","pd50")
+months=c(4:9)
+variables=paste(rep(variables, each=length(months)), months, sep="_")
+
+#create List object to store results
+DataList1 = replicate(length(variables)*length(phenophases), data.frame())
+DataList2 = replicate(length(variables)*length(phenophases), data.frame())
+DataList3 = replicate(length(variables)*length(phenophases), data.frame())
+names(DataList1) = paste(rep(variables, each=length(phenophases)), phenophases, sep="_")
+names(DataList2) = paste(rep(variables, each=length(phenophases)), phenophases, sep="_")
+names(DataList3) = paste(rep(variables, each=length(phenophases)), phenophases, sep="_")
+
+#counter
+i=1
+
+#Loop
+for (variable.name in variables){
+  
+  for (phenophase in phenophases){
+    
+    #extract variables
+    var          = as.numeric(Flux.df %>% pull(variable.name))
+    Senesc_DOY   = as.numeric(Flux.df %>% pull(phenophase))
+    Site         = Flux.df$SiteName
+    
+    #run model
+    fit_multi = lmer(Senesc_DOY ~ var + (1 | Site))
+    
+    # Extract information for plotting
+    plotMulti = allEffects(fit_multi)
+    
+    # Extract coefficients
+    df.coefficients = tibble(Coefficient = coef(summary(fit_multi))[ , "Estimate"][2],
+                             std.error = coef(summary(fit_multi))[ , "Std. Error"][2],
+                             CI.lo = confint(fit_multi)[4,1],
+                             CI.hi = confint(fit_multi)[4,2],
+                             variable = variable.name,
+                             phenophase = phenophase)
+    
+    # Final table
+    df <- tibble(upper    = plotMulti$var$upper[,1],
+                 lower    = plotMulti$var$lower[,1],
+                 off      = plotMulti$var$fit[,1],
+                 xval     = plotMulti$var$x[,1],
+                 variable = paste0(variable.name),
+                 phenophase = phenophase) 
+    
+    # get phenology anomalies
+    df = df %>%
+      group_by(variable, phenophase) %>%
+      mutate(anomaly       = off   - mean(off),
+             anomaly.upper = upper - mean(off),
+             anomaly.lower = lower - mean(off)) %>%
+      ungroup()
+    
+    ##############################################################################################################################################
+    
+    # get partial Senescence dates, removing site (random) effect
+    y_partial = remef::remef(fit_multi,  ran="all", keep.intercept = T)
+    
+    # Create table 
+    df.fitted = tibble(fitted     = y_partial,
+                       x          = var,
+                       variable   = variable.name,
+                       phenophase = phenophase)
+    
+    ##############################################################################################################################################
+    
+    #store data frame in variable list
+    DataList1[[i]] = df 
+    DataList2[[i]] = df.coefficients %>% 
+      mutate(R2  = summary(lm(fitted~x, data=df.fitted))$r.squared,
+             P   = summary(lm(fitted~x, data=df.fitted))$coefficients[2,4],
+             Sig = ifelse(P<0.001, "***", ifelse(P<0.01, "**", ifelse(P<0.05, "*", "n.s."))))
+    DataList3[[i]] = df.fitted 
+    
+    #count
+    #print(paste0('...',i,' out of ',length(DataList1), ' done'))
+    i=i+1
+  }
+}
+
+#bind rows
+MixedModel.df   = bind_rows(DataList1) %>% 
+  separate(variable, into=c("variable", "Month"), sep = "_") %>% 
+  mutate(Month = plyr::revalue(Month, 
+                               c("4" = "April" , "5" = "May", "6" = "June",
+                                 "7" = "July", "8" = "August", "9" = "September")),
+         Month = factor(Month, levels = c("April","May",'June','July','August','September')))
+
+monthly.df = bind_rows(DataList2) %>% 
+  separate(variable, into=c("variable", "Month"), sep = "_") %>% 
+  mutate(equation.variable = paste(phenophase, variable, sep='_')) 
+
+coefficients.df = monthly.df %>% 
+  mutate(Month = plyr::revalue(Month, 
+                               c("4" = "April" , "5" = "May", "6" = "June",
+                                 "7" = "July", "8" = "August", "9" = "September")),
+         Month = factor(Month, levels = c("April","May",'June','July','August','September')))
+
+fitted.df       = bind_rows(DataList3)    %>% 
+  separate(variable, into=c("variable", "Month"), sep = "_") %>% 
+  mutate(Month = plyr::revalue(Month, 
+                               c("4" = "April" , "5" = "May", "6" = "June",
+                                 "7" = "July", "8" = "August", "9" = "September")),
+         Month = factor(Month, levels = c("April","May",'June','July','August','September')))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########################################
+## Interpolation of monthly estimates ##
+########################################
+
+
+
+#Interpolation function
+lin_interp = function(x, y, length.out=100) {
+  approx(x, y, xout=seq(min(x), max(x), length.out=length.out))$y
+}
+
+monthly.df = monthly.df %>%
+  mutate(Month = as.numeric(Month))
+
+
+#create identifier
+equation.variable = unique(monthly.df$equation.variable)
+
+#create interpolation dataframe
+df.interp = data.frame()
+df.AUC = data.frame()
+
+#loop over variable x equation x species vector
+for (variable.name in equation.variable){
+  
+  #subset table
+  df.sub = monthly.df  %>% 
+    filter(equation.variable == variable.name)
+  
+  # Interpolate data
+  created.interp = lin_interp(df.sub$Month, df.sub$Month)
+  score.interp   = lin_interp(df.sub$Month, df.sub$Coefficient)
+  df.interp.sub  = data.frame(created=created.interp, score=score.interp)
+  # Make a grouping variable for each pos/neg segment
+  cat.rle        = rle(df.interp.sub$score < 0)
+  df.interp.sub  = df.interp.sub %>%
+    mutate(group = rep.int(1:length(cat.rle$lengths),  times=cat.rle$lengths),
+           variable = unique(df.sub$variable),
+           equation = unique(df.sub$phenophase),
+           equation.variable = paste(phenophase, variable, sep='_') )
+  #rbind sub dataframes 
+  df.interp = rbind(df.interp, df.interp.sub)
+  
+  #get Area under curve (%)
+  df.AUC.sub = df.interp.sub %>%
+    mutate(positive = ifelse(score<0, 0, score),
+           negative = ifelse(score>0, 0, score))%>%
+    summarise(sum.pos = trapz(created, positive), 
+              sum.neg = abs(pracma::trapz(created, negative)))%>%
+    mutate(percent.neg = round(sum.neg/(sum.pos+sum.neg)*100),
+           percent.pos = round(sum.pos/(sum.pos+sum.neg)*100),
+           variable = unique(df.sub$variable),
+           equation = unique(df.sub$phenophase),
+           equation.variable = paste(phenophase, variable, sep='_') )
+  #rbind sub dataframes 
+  df.AUC = rbind(df.AUC, df.AUC.sub)
+}
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#########################
+## Publication figures ##
+#########################
+
+
+
+variables = unique(MixedModel.df$variable)
+
+#loop
+for (variable.name in variables){
+  
+  
+  ###########################
+  # Summary of monthly models
+  ###########################
+  
+  
+  # subset the table
+  ##################
+  
+  Monthly.df.EOS10.sub = monthly.df  %>% 
+    filter(variable == variable.name,
+           phenophase=="pd10") 
+  Monthly.df.EOS25.sub = monthly.df  %>% 
+    filter(variable == variable.name,
+           phenophase=="pd25") 
+  Monthly.df.EOS50.sub = monthly.df  %>% 
+    filter(variable == variable.name,
+           phenophase=="pd50") 
+  
+  df.interp.EOS10.sub = df.interp  %>% 
+    filter(variable == variable.name,
+           equation=="pd10")
+  df.interp.EOS25.sub = df.interp  %>% 
+    filter(variable == variable.name,
+           equation=="pd25")
+  df.interp.EOS50.sub = df.interp  %>% 
+    filter(variable == variable.name,
+           equation=="pd50")
+  
+  df.AUC.EOS10.sub = df.AUC  %>% 
+    filter(variable == variable.name,
+           equation=="pd10")
+  df.AUC.EOS25.sub = df.AUC  %>% 
+    filter(variable == variable.name,
+           equation=="pd25")
+  df.AUC.EOS50.sub = df.AUC  %>% 
+    filter(variable == variable.name,
+           equation=="pd50")
+  
+  # EOS10 Plot
+  ############
+  
+  EOS10.Monthly.plot = ggplot() + 
+    geom_area(data = df.interp.EOS10.sub, aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=Monthly.df.EOS10.sub, 
+               aes(x=Month, y=Coefficient))+
+    geom_errorbar(data=Monthly.df.EOS10.sub, 
+                  aes(x=Month, ymin=CI.lo, ymax=CI.hi), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.EOS10.sub, mapping = aes(x = -Inf, y = Inf, 
+                                                     hjust = -0.1, vjust = 1.5,
+                                                     label = paste0(percent.neg,'% / ',percent.pos, '%')))+
+    coord_cartesian(xlim=c(4.1, 8.9)) +
+    xlab("")+ylab("Days per unit")+
+    scale_x_continuous(breaks = seq(3,10,by=1),
+                       labels = c('Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'))+
+    plotTheme1
+  
+  # EOS25 Plot
+  ############
+  
+  EOS25.Monthly.plot = ggplot() + 
+    geom_area(data = df.interp.EOS25.sub, aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=Monthly.df.EOS25.sub, 
+               aes(x=Month, y=Coefficient))+
+    geom_errorbar(data=Monthly.df.EOS25.sub, 
+                  aes(x=Month, ymin=CI.lo, ymax=CI.hi), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.EOS25.sub, mapping = aes(x = -Inf, y = Inf, 
+                                                     hjust = -0.1, vjust = 1.5,
+                                                     label = paste0(percent.neg,'% / ',percent.pos, '%')))+
+    coord_cartesian(xlim=c(4.1, 8.9)) +
+    xlab("")+ylab("Days per unit")+
+    scale_x_continuous(breaks = seq(3,10,by=1),
+                       labels = c('Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'))+
+    plotTheme1
+  
+  # EOS50 Plot
+  ############
+  
+  EOS50.Monthly.plot = ggplot() + 
+    geom_area(data = df.interp.EOS50.sub, aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=Monthly.df.EOS50.sub, 
+               aes(x=Month, y=Coefficient))+
+    geom_errorbar(data=Monthly.df.EOS50.sub, 
+                  aes(x=Month, ymin=CI.lo, ymax=CI.hi), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.EOS50.sub, mapping = aes(x = -Inf, y = Inf, 
+                                                     hjust = -0.1, vjust = 1.5,
+                                                     label = paste0(percent.neg,'% / ',percent.pos, '%')))+
+    coord_cartesian(xlim=c(4.1, 8.9)) +
+    xlab("")+ylab("Days per unit")+
+    scale_x_continuous(breaks = seq(3,10,by=1),
+                       labels = c('Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'))+
+    plotTheme1
+  
+  
+  ##############################################################################################################################################
+  
+  
+  ###################
+  # Univariate models
+  ###################
+  
+  
+  #Driver plots
+  MixedModel.df.sub = MixedModel.df %>%
+    filter(variable == variable.name)
+  
+  coefficients.df.sub = coefficients.df %>% 
+    filter(variable == variable.name)
+  
+  fitted.df.sub = fitted.df %>%
+    filter(variable == variable.name)
+  
+  # EOS10
+  #######
+  
+  EOS10uni = ggplot() + 
+    
+    geom_point(data=fitted.df.sub[fitted.df.sub$phenophase=="pd10",], 
+               aes(y= fitted, x= x, color=Month),size=0.15) +
+    
+    geom_ribbon(data = MixedModel.df.sub[MixedModel.df.sub$phenophase=="pd10",], 
+                aes(x = xval, ymin = lower, ymax = upper, fill=Month), 
+                alpha = 0.5) +
+    
+    geom_line(data=MixedModel.df.sub[MixedModel.df.sub$phenophase=="pd10",], 
+              aes(xval, off, color = Month)) +
+    
+    geom_text(data=coefficients.df.sub[coefficients.df.sub$phenophase=="pd10",], 
+              aes(label=paste0(round(Coefficient,2),
+                               " ± ", 
+                               round(1.96*std.error,2), 
+                               " days per unit\nR2 = ", 
+                               round(R2,2),
+                               Sig),
+                  x=Inf, y=Inf, hjust = 1.05, vjust = 1.5), size=3) +
+    
+    scale_color_manual(values = c('#F21A00','#F21A00','#F21A00','#3B9AB2','#3B9AB2','#3B9AB2'))+
+    scale_fill_manual(values = c('#F21A00','#F21A00','#F21A00','#3B9AB2','#3B9AB2','#3B9AB2'))+
+    
+    coord_cartesian(ylim = c(160,250)) +
+    
+    labs(x = variable.name, y = expression(PD[10]~(DOY))) +
+    
+    plotTheme1 +
+    
+    facet_wrap(~Month, scales="free_x", ncol=2, dir="v")
+  
+  
+  # EOS25
+  #######
+  
+  EOS25uni = ggplot() + 
+    
+    geom_point(data=fitted.df.sub[fitted.df.sub$phenophase=="pd25",], 
+               aes(y= fitted, x= x, color=Month),size=0.15) +
+    
+    geom_ribbon(data = MixedModel.df.sub[MixedModel.df.sub$phenophase=="pd25",], 
+                aes(x = xval, ymin = lower, ymax = upper, fill = Month), 
+                alpha = 0.5) +
+    
+    geom_line(data=MixedModel.df.sub[MixedModel.df.sub$phenophase=="pd25",], 
+              aes(xval, off, color=Month)) +
+    
+    geom_text(data=coefficients.df.sub[coefficients.df.sub$phenophase=="pd25",], 
+              aes(label=paste0(round(Coefficient,2), 
+                               " ± ", 
+                               round(2*std.error,2), 
+                               " days per unit\nR2 = ", 
+                               round(R2,2), 
+                               Sig),
+                  x=Inf, y=Inf, hjust = 1.1, vjust = 1.5), size=3) +
+    
+    scale_color_manual(values = c('#F21A00','#F21A00','#F21A00','#3B9AB2','#3B9AB2','#3B9AB2'))+
+    scale_fill_manual(values = c('#F21A00','#F21A00','#F21A00','#3B9AB2','#3B9AB2','#3B9AB2'))+
+    
+    coord_cartesian(ylim = c(190,275)) +
+    
+    labs(x = variable.name, y = expression(PD[25]~(DOY))) +
+    
+    plotTheme1 +
+    
+    facet_wrap(~Month, scales="free_x", ncol=2, dir="v")
+  
+  
+  # EOS50
+  #######
+  
+  EOS50uni = ggplot() + 
+    
+    geom_point(data=fitted.df.sub[fitted.df.sub$phenophase=="pd50",], 
+               aes(y= fitted, x= x, color=Month),size=0.15) +
+    
+    geom_ribbon(data = MixedModel.df.sub[MixedModel.df.sub$phenophase=="pd50",], 
+                aes(x = xval, ymin = lower, ymax = upper, fill = Month), 
+                alpha = 0.5) +
+    
+    geom_line(data=MixedModel.df.sub[MixedModel.df.sub$phenophase=="pd50",], 
+              aes(xval, off, color=Month)) +
+    
+    geom_text(data=coefficients.df.sub[coefficients.df.sub$phenophase=="pd50",], 
+              aes(label=paste0(round(Coefficient,2), 
+                               " ± ", 
+                               round(2*std.error,2), 
+                               " days per unit\nR2 = ", 
+                               round(R2,2),
+                               Sig),
+                  x=Inf, y=Inf, hjust = 1.1, vjust = 1.5), size=3) +
+    
+    scale_color_manual(values = c('#F21A00','#F21A00','#F21A00','#3B9AB2','#3B9AB2','#3B9AB2'))+
+    scale_fill_manual(values = c('#F21A00','#F21A00','#F21A00','#3B9AB2','#3B9AB2','#3B9AB2'))+
+    
+    coord_cartesian(ylim = c(220,300)) +
+    
+    labs(x = variable.name, y = expression(PD[50]~(DOY))) +
+    
+    plotTheme1 +
+    
+    facet_wrap(~Month, scales="free_x", ncol=2, dir="v")
+  
+  
+  ##############################################################################################################################################
+  
+  
+  ############
+  # Safe plots
+  ############
+  
+  
+  #define plot layout
+  layout <- "
+  A
+  B
+  B
+  B"
+  
+  #Merge EOS10 plots
+  EOS10.plot = EOS10.Monthly.plot + EOS10uni +
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plot as .pdf
+  ggsave(EOS10.plot, file=paste('EOS10_',variable.name, "_deciduous.pdf", sep=''), path=output_path,
+         width=4.5, height=9)
+  
+  print(EOS10.plot)
+  
+  
+  #Merge EOS25 plots
+  EOS25.plot = EOS25.Monthly.plot + EOS25uni +
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plot as .pdf
+  ggsave(EOS25.plot, file=paste('EOS25_',variable.name, "_deciduous.pdf", sep=''), path=output_path,
+         width=4.5, height=9)
+  
+  print(EOS25.plot)
+  
+  
+  #Merge EOS50 plots
+  EOS50.plot = EOS50.Monthly.plot + EOS50uni +
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plot as .pdf
+  ggsave(EOS50.plot, file=paste('EOS50_',variable.name, "_deciduous.pdf", sep=''), path=output_path,
+         width=4.5, height=9)
+  
+  print(EOS50.plot) 
+  
+  
+  ##############################################################################################################################################
+  
+  
+  #count
+  print(variable.name)
+}
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## date time
+Sys.time()
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```
+

@@ -1,0 +1,412 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 31, 2023"
+
+subtitle: Driver comparison soil moisture (Figure S22)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S22: The effects of pre- and post-solstice temperature, radiation, water availability and spring leaf-out dates on inter-annual variation in the timing of EOS10 (A) and EOS50 (B, C) [same as Fig. 5 but using soil moisture instead of precipitation to represent water availability]
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(broom.mixed)
+require(gmodels)
+require(lme4)
+require(car)
+require(sjmisc)
+require(wesanderson)
+require(patchwork)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2")
+
+# paths
+startSen_path     = "Remote_sensing/Analysis/Analysis_input/Drivers_final_EOS10/Merged_file"
+MidGreendown_path = "Remote_sensing/Analysis/Analysis_input/Drivers_final_EOS50/Merged_file"
+PEP_path          = "PEP_analysis/Analysis/Analysis_input/PEP_drivers_final/Merged_file"
+output_path       = "Remote_sensing/Analysis/Analysis_output_startSen/DriverComparison"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#PEP dataframe
+##############
+
+PEP.df <- fread(paste(PEP_path, "pep_drivers_data_preseason.csv", sep="/")) %>%
+  mutate(SWrad.LO.SO = rowSums(.[,363:365]))
+
+
+
+#MODIS Senescence dataframe
+###########################
+
+startSen.df <- fread(paste(startSen_path, "Remote_sensing_drivers_data_startSen_preseason.csv", sep="/")) %>%
+  #delete pixels with no photosynthesis before solstice
+  group_by(geometry) %>%
+  filter(!(mean(GPPstart.LO.SO)<.1)) %>%
+  ungroup()
+
+
+
+#MODIS MidGreendown dataframe
+#############################
+
+MidGreendown.df <- fread(paste(MidGreendown_path, "Remote_sensing_drivers_data_preseason.csv", sep="/")) %>%
+  #delete pixels with no photosynthesis before solstice
+  group_by(geometry) %>%
+  filter(!(mean(GPPstart.LO.SO)<.1)) %>%
+  ungroup()
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text.y       = element_text(colour = 'black'),
+  axis.text.x       = element_text(angle = 45, hjust=1, colour = 'black'),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold", size=11, hjust = 0.5))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################################################
+## MODIS: Pixel-level linear senescence models ##
+#################################################
+
+
+
+RSModel.df = startSen.df %>%
+  group_by(LC_Type, geometry) %>%
+  do({
+    
+    #run model
+    ##########
+    
+    model1 = lm(scale(Senesc_DOY)~
+                  scale(Tday.LO.SO)+scale(SWrad.LO.SO)+scale(Moist.LO.SO)+scale(Greenup_DOY)+
+                  scale(Tday.SO.SE)+scale(SWrad.SO.SE)+scale(Moist.SO.SE),  
+                data=.)
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(tidy(model1) )
+    
+  }) %>%
+  mutate(term     = gsub("scale","",term)) %>%
+  mutate(term     = str_replace_all(term,"\\(|\\)", "") ) %>%
+  #delete intercept
+  filter(!term %in% c("Intercept")) %>%
+  ungroup() %>% 
+  mutate(LC_Type  = factor(LC_Type, levels=c("Mixed","DecB","EvgN","DecN")),
+         LC_Type = plyr::revalue(LC_Type, c("Mixed" = "Mixed", 
+                                            "DecB" = "Deciduous broadleaf",
+                                            "EvgN" = "Evergreen needleleaf",
+                                            "DecN" = "Deciduous needleleaf")),
+         term = factor(term, 
+                       levels=c('Tday.LO.SO','Tday.SO.SE','SWrad.LO.SO', 'SWrad.SO.SE',"Greenup_DOY", "Moist.LO.SO", 'Moist.SO.SE'), ordered=T) )
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+###################################################
+## MODIS: Pixel-level linear MidGreendown models ##
+###################################################
+
+
+
+MidGreendownModel.df = MidGreendown.df %>%
+  group_by(LC_Type, geometry) %>%
+  do({
+    
+    #run model
+    ##########
+    
+    model1 = lm(scale(MidGreendown_DOY)~
+                  scale(Tday.LO.SO)+scale(SWrad.LO.SO)+scale(Moist.LO.SO)+scale(Greenup_DOY)+
+                  scale(Tday.SO.SE)+scale(SWrad.SO.SE)+scale(Moist.SO.SE),  
+                data=.)
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(tidy(model1) )
+    
+  }) %>%
+  mutate(term     = gsub("scale","",term)) %>%
+  mutate(term     = str_replace_all(term,"\\(|\\)", "") ) %>%
+  #delete intercept
+  filter(!term %in% c("Intercept")) %>%
+  ungroup() %>% 
+  mutate(LC_Type  = factor(LC_Type, levels=c("Mixed","DecB","EvgN","DecN")),
+         LC_Type = plyr::revalue(LC_Type, c("Mixed" = "Mixed", 
+                                            "DecB" = "Deciduous broadleaf",
+                                            "EvgN" = "Evergreen needleleaf",
+                                            "DecN" = "Deciduous needleleaf")),
+         term = factor(term, 
+                       levels=c('Tday.LO.SO','Tday.SO.SE','SWrad.LO.SO', 'SWrad.SO.SE',"Greenup_DOY", "Moist.LO.SO", 'Moist.SO.SE'), ordered=T) )
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+############################################
+## PEP725: Individual-level linear models ##
+############################################
+
+
+
+PEPmodel.df = PEP.df %>%
+  group_by(species, pep_id) %>%
+  do({
+    
+    #run model
+    ##########
+    
+    model1 = lm(scale(leaf_off)~
+                  scale(Tday.LO.SO)  +scale(SWrad.LO.SO)+scale(Moist.LO.SO)+scale(leaf_out)+
+                  scale(Tnight.SO.SE)+scale(SWrad.SO.SE)+scale(Moist.SO.SE),  
+                data=.)
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(rbind(tidy(model1)))
+    
+  }) %>%
+  mutate(term     = gsub("scale","",term)) %>%
+  mutate(term     = str_replace_all(term,"\\(|\\)", "") ) %>%
+  #delete intercept
+  filter(!term %in% c("Intercept")) %>%
+  ungroup() %>% 
+  mutate(term = factor(term, 
+                       levels=c('Tday.LO.SO','Tnight.SO.SE','SWrad.LO.SO', 'SWrad.SO.SE',"leaf_out", "Moist.LO.SO", 'Moist.SO.SE'), ordered=T) )
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##################################
+# Land-cover type-specific plots #
+##################################
+
+
+
+A = ggplot(data = RSModel.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_boxplot(outlier.shape = NA, notch = T) +
+  geom_hline(yintercept = 0)+
+  xlab("") + ylab("Standardized effect") +
+  facet_grid(LC_Type~.)+
+  coord_cartesian(ylim=c(-.9,.9))+
+  scale_fill_manual(values = rev(wes_palette(7, name = "Zissou1", type = "continuous")))+
+  ggtitle(expression(EOS[10]~(Satellite))) +
+  plotTheme1
+
+B = ggplot(data = MidGreendownModel.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_boxplot(outlier.shape = NA, notch = T) +
+  geom_hline(yintercept = 0)+
+  xlab("") + ylab("") +
+  facet_grid(LC_Type~.)+
+  coord_cartesian(ylim=c(-.9,.9))+
+  scale_fill_manual(values = rev(wes_palette(7, name = "Zissou1", type = "continuous")))+
+  ggtitle(expression(EOS[50]~(Satellite))) +
+  plotTheme1+
+  theme(axis.text.y=element_blank())
+
+C = ggplot(data = PEPmodel.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_boxplot(outlier.shape = NA, notch = T) +
+  geom_hline(yintercept = 0)+
+  xlab("") + ylab("") +
+  facet_grid(species~.)+
+  coord_cartesian(ylim=c(-.9,.9))+
+  scale_fill_manual(values = rev(wes_palette(7, name = "Zissou1", type = "continuous")))+
+  ggtitle(expression(EOS[50]~(PEP725~data))) +
+  plotTheme1 +
+  theme(axis.text.y=element_blank(),
+        strip.text        = element_text(colour = 'black', face="italic"))
+
+#define plot layout
+layout <- "
+ABC"
+
+#Merge plots
+DriverPlot = A + B + C +
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'a')&
+  theme(plot.tag = element_text(face = 'bold'))
+
+#save plots as .pdf
+ggsave(DriverPlot, file="DriverPlot_LCtype_moisture.pdf", path=output_path,
+       width=8, height=8)
+
+DriverPlot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##################
+# Combined plots #
+##################
+
+
+
+A = ggplot(data = RSModel.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_boxplot(outlier.shape = NA, notch = T) +
+  geom_hline(yintercept = 0)+
+  xlab("") + ylab("Standardized effect") +
+  coord_cartesian(ylim=c(-.9,.9))+
+  scale_fill_manual(values = rev(wes_palette(7, name = "Zissou1", type = "continuous")))+
+  ggtitle(expression(EOS[10]~(Satellite))) +
+  plotTheme1 +
+  theme(axis.text.x=element_blank())
+
+B = ggplot(data = MidGreendownModel.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_boxplot(outlier.shape = NA, notch = T) +
+  geom_hline(yintercept = 0)+
+  xlab("") + ylab("Standardized effect") +
+  coord_cartesian(ylim=c(-.9,.9))+
+  scale_fill_manual(values = rev(wes_palette(7, name = "Zissou1", type = "continuous")))+
+  ggtitle(expression(EOS[50]~(Satellite))) +
+  plotTheme1+
+  theme(axis.text.x=element_blank())
+
+C = ggplot(data = PEPmodel.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_boxplot(outlier.shape = NA, notch = T) +
+  geom_hline(yintercept = 0)+
+  xlab("") + ylab("Standardized effect") +
+  coord_cartesian(ylim=c(-.9,.9))+
+  scale_fill_manual(values = rev(wes_palette(7, name = "Zissou1", type = "continuous")))+
+  ggtitle(expression(EOS[50]~(PEP725~data))) +
+  plotTheme1 
+
+#define plot layout
+layout <- "
+A
+B
+C"
+
+#Merge plots
+DriverPlot = A + B + C +
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'a')&
+  theme(plot.tag = element_text(face = 'bold'))
+
+#save plots as .pdf
+ggsave(DriverPlot, file="FigS22_DriverPlot_All_moisture.pdf", path=output_path,
+       width=3, height=8)
+
+DriverPlot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## datetime
+Sys.time()
+
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```
+</details>

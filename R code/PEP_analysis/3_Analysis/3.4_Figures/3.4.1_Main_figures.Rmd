@@ -1,0 +1,1209 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 30, 2023"
+
+subtitle: PEP725 data (Figs. 4, S15, S16 and S19)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. 4: The seasonal effects of temperature on inter-annual variation in mid-senescence (EOS50 dates) from European long-term observations (PEP725 data)
+- Fig. S15: Relationships between seasonal photosynthesis and the timing of mid-senescence (EOS50) from European long-term observations (PEP725 data; same as Fig. 4 but using photosynthesis as predictor variable)
+- Fig. S16: Predicted mid-senescence (EOS50) anomalies in response to mean annual temperature (MAT) anomalies from European long-term observations (PEP725 data)
+- Fig. S19: Moving window analyses of EOS50 dates using the local PEP725 observations and covering each 20-year time period from 1966 to 2015 (left panels) or each 15-year time period from 1980 to 2015 (right panels)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(ggplot2)
+require(pracma)
+require(wesanderson)
+require(patchwork)
+require(broom)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/PEP_analysis/Analysis")
+
+
+# Paths
+
+#input
+PEP_drivers_path      = "Analysis_input/PEP_drivers_final/Merged_file"
+PEP_analysis_path     = "Analysis_output/Autumn/Data"
+photo_path            = "Analysis_input/Drivers" #Photoperiod file
+
+#output
+output_path              = "Analysis_output/Autumn/Publication_figures"
+output_path_monthly      = "Analysis_output/Autumn/Monthly_correlations"
+output_path_seasonal     = "Analysis_output/Autumn/Seasonal_correlations"
+output_path_movingWindow = "Analysis_output/Autumn/Moving_window"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#Predictions dataframe
+######################
+
+Predictions.df = as.data.frame(fread(paste(PEP_drivers_path, "pep_drivers_data_preseason_predictions.csv", sep="/"))) %>%
+  #get mean annual temperature
+  mutate(MAT = rowMeans(.[c("Tday1","Tday2","Tday3","Tday4","Tday5","Tday6",
+                            "Tday7","Tday8","Tday9","Tday10","Tday11","Tday12")])) %>%
+  #get timeries-level MAT and leaf-off anomalies
+  group_by(timeseries)%>%
+  mutate(MATanomaly = MAT - mean(MAT),
+         leaf_off_anomaly = leaf_off - mean(leaf_off)) %>%
+  ungroup()
+  
+
+#Mixed models dataframe
+#######################
+
+MM.df = fread(paste(PEP_analysis_path, "Mixed_effect_data.csv", sep="/"))
+#term: monthly coefficients (1-10) and seasonal coeffcients
+#estimate: slopes or standardized coefficients of mixed effects models
+#std.error: std.error of coefficients
+#statisitc: 
+#variable: climate variable (Apm, Azani, GSI, GSIrad, GDDday, GDDday, Tday, Tnight, SWrad)
+#equation: full model 1/2, monthly/seasonal/solstice, scaled/unscaled, tempCon (Tnight controlled)
+#species: All, Fagus, Betula, Quercus, Aesculus
+
+
+# get full model correlations
+#############################
+
+FullMM.df = MM.df %>%
+  #filter monthly models
+  filter(equation == 'full model')
+
+
+# get monthly correlations
+##########################
+
+MonthlyMM.df = MM.df %>%
+  #filter monthly models
+  filter(grepl("monthly",equation)) %>%
+  #Add variable x equation identifier
+  mutate(variable.equation.species = paste(variable, equation, species, sep='.'),
+         variable.equation = paste(variable, equation, sep='.'),
+         term = as.numeric(term))
+
+
+# get seasonal correlations
+###########################
+
+SeasonalMM.df = MM.df %>%
+  #filter monthly models
+  filter(!grepl("monthly",equation),
+         !equation == 'full model') %>%
+  #Add variable x equation identifier
+  mutate(variable.equation = paste(variable, equation, sep='.'),
+         variable.class = gsub("^.*?\\.","", term) ) %>%
+  filter(!variable.class == "SOp60.SE")
+
+
+#Moving window dataframe
+########################
+
+MW.df = fread(paste(PEP_analysis_path, "Moving_window_data.csv", sep="/"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+################
+## Plot theme ##
+################
+
+
+#Color.palette:  col=c('#F21A00','#E1AF00','#EBCC2A','#78B7C5','#3B9AB2')
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black',face = "italic"),
+  plot.title        = element_text(face="bold"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+###################################################################################
+## Get date of reversal of climate-phenology relationship for moving window data ##
+###################################################################################
+
+
+
+#Data wrangling
+MWreversal.df = MW.df %>%
+  #keep only monthly estimates
+  filter(equation == 'monthly') %>%
+  #convert term (months) to numeric and keep only May to Sep
+  mutate(term = as.numeric(term)) %>%
+  filter(term %in% c(4:9)) 
+
+#-------------------------------------------------------------
+
+#get reversal date for mean estimate
+####################################
+
+MWreversalMean.df = MWreversal.df %>%
+  #group
+  group_by(dataset, species, variable, year)%>%
+  #get difference in estimate between month and preceding month
+  mutate(Diff.autumn = estimate - lag(estimate),
+         Diff.spring = estimate - lead(estimate))%>%
+  #delete autumn months for which the correlation decreases realtive to previous month
+  filter(! (Diff.autumn < 0 & term %in% c(8:10)),
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  #redo 2 times
+  mutate(Diff.autumn = estimate - lag(estimate),
+         Diff.spring = estimate - lead(estimate))%>%
+  filter(! (Diff.autumn < 0 & term %in% c(8:10))&
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  mutate(Diff.autumn = estimate - lag(estimate),
+         Diff.spring = estimate - lead(estimate))%>%
+  filter(! (Diff.autumn < 0 & term %in% c(8:10)),
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  #convert months to date
+  mutate(date = as.Date((paste0('2000-',term,'-15'))))%>%
+  #approximate date of reversal
+  summarize(date0 = as.Date(approx(estimate,       date, .0)$y, origin="1970-01-01"))%>%
+  ungroup()
+
+#-------------------------------------------------------------
+
+#get reversal date for upper estimate
+#####################################
+
+MWreversalUpper.df = MWreversal.df %>%
+  #get upper confidence value
+  mutate(upper.estimate = estimate + 2*std.error)%>%
+  #group
+  group_by(dataset, species, variable, year)%>%
+  #get difference in estimate between month and preceding month
+  mutate(Diff.autumn = upper.estimate - lag(upper.estimate),
+         Diff.spring = upper.estimate - lead(upper.estimate))%>%
+  #delete autumn months for which the correlation decreases realtive to previous month
+  filter(! (Diff.autumn < 0 & term %in% c(8:10)),
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  #redo 2 times
+  mutate(Diff.autumn = upper.estimate - lag(upper.estimate),
+         Diff.spring = upper.estimate - lead(upper.estimate))%>%
+  filter(! (Diff.autumn < 0 & term %in% c(8:10))&
+           ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  mutate(Diff.autumn = upper.estimate - lag(upper.estimate),
+         Diff.spring = upper.estimate - lead(upper.estimate))%>%
+  filter(! (Diff.autumn < 0 & term %in% c(8:10)),
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  #convert months to date
+  mutate(date = as.Date((paste0('2000-',term,'-15'))))%>%
+  #approximate date of reversal
+  summarize(date0.upper = as.Date(approx(upper.estimate, date, .0)$y, origin="1970-01-01"))%>%
+  ungroup()
+
+#-------------------------------------------------------------
+
+#get reversal date for lower estimate
+#####################################
+
+MWreversalLower.df = MWreversal.df %>%
+  #get lower confidence value
+  mutate(lower.estimate = estimate - 2*std.error)%>%
+  #group
+  group_by(dataset, species, variable, year)%>%
+  #get difference in estimate between month and preceding month
+  mutate(Diff.autumn = lower.estimate - lag(lower.estimate),
+         Diff.spring = lower.estimate - lead(lower.estimate))%>%
+  #delete autumn months for which the correlation decreases realtive to previous month
+  filter(! (Diff.autumn < 0 & term %in% c(8:10)),
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  #redo 2 times
+  mutate(Diff.autumn = lower.estimate - lag(lower.estimate),
+         Diff.spring = lower.estimate - lead(lower.estimate))%>%
+  filter(! (Diff.autumn < 0 & term %in% c(8:10))&
+           ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  mutate(Diff.autumn = lower.estimate - lag(lower.estimate),
+         Diff.spring = lower.estimate - lead(lower.estimate))%>%
+  filter(! (Diff.autumn < 0 & term %in% c(8:10)),
+         ! (Diff.spring > 0 & term %in% c(1:5)))%>%
+  #convert months to date
+  mutate(date = as.Date((paste0('2000-',term,'-15'))))%>%
+  #approximate date of reversal
+  summarize(date0.lower = as.Date(approx(lower.estimate, date, .0)$y, origin="1970-01-01"))%>%
+  ungroup()
+
+#-------------------------------------------------------------
+
+#cbind
+MWreversal.df = cbind(MWreversalMean.df, date0.upper=MWreversalUpper.df$date0.upper, date0.lower=MWreversalLower.df$date0.lower)
+rm(MWreversalMean.df, MWreversalUpper.df, MWreversalLower.df)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########################################
+## Interpolation of monthly estimates ##
+########################################
+
+
+
+#Interpolation function
+lin_interp = function(x, y, length.out=100) {
+  approx(x, y, xout=seq(min(x), max(x), length.out=length.out))$y
+}
+
+#create identifier
+variable.equation.species = unique(MonthlyMM.df$variable.equation.species)
+
+#create interpolation dataframe
+df.interp = data.frame()
+df.AUC = data.frame()
+
+#loop over variable x equation x species vector
+for (variable.name in variable.equation.species){
+
+  #subset table
+  df.sub = MonthlyMM.df  %>% 
+    filter(variable.equation.species == variable.name)
+  
+  # Interpolate data
+  created.interp = lin_interp(df.sub$term, df.sub$term)
+  score.interp   = lin_interp(df.sub$term, df.sub$estimate)
+  df.interp.sub  = data.frame(created=created.interp, score=score.interp)
+  # Make a grouping variable for each pos/neg segment
+  cat.rle        = rle(df.interp.sub$score < 0)
+  df.interp.sub  = df.interp.sub %>%
+    mutate(group = rep.int(1:length(cat.rle$lengths),  times=cat.rle$lengths),
+           species = unique(df.sub$species),
+           variable = unique(df.sub$variable),
+           equation = unique(df.sub$equation),
+           variable.equation = paste(variable, equation, sep='.') )
+  #rbind sub dataframes 
+  df.interp = rbind(df.interp, df.interp.sub)
+  
+  #get Area under curve (%)
+  df.AUC.sub = df.interp.sub %>%
+    mutate(positive = ifelse(score<0, 0, score),
+           negative = ifelse(score>0, 0, score))%>%
+    summarise(sum.pos = trapz(created, positive), 
+              sum.neg = abs(trapz(created, negative)))%>%
+    mutate(percent.neg = round(sum.neg/(sum.pos+sum.neg)*100),
+           percent.pos = round(sum.pos/(sum.pos+sum.neg)*100),
+           species = unique(df.sub$species),
+           variable = unique(df.sub$variable),
+           equation = unique(df.sub$equation),
+           variable.equation = paste(variable, equation, sep='.') )
+  #rbind sub dataframes 
+  df.AUC = rbind(df.AUC, df.AUC.sub)
+}
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#########################
+## Publication figures ##
+#########################
+
+ 
+
+######################
+# Photoperiod figure #
+######################
+
+
+# dataframe of photoperiods
+photo.df = fread(paste(photo_path, "Photoperiod.csv", sep="/"))
+phot.sub=photo.df[1,3:367]
+phot.sub=rbind(as.data.frame(t(phot.sub)), as.data.frame(t(phot.sub)))
+phot.sub$X = as.Date(1:nrow(phot.sub), origin = "2016-12-31")
+
+
+# Plot of periods around solstice
+#################################
+
+#dataframe of periods
+solstice.data = rbind(
+  data.frame(X=as.Date(c("2017-05-14","2017-06-12")), Y=10, season = "A"),
+  data.frame(X=as.Date(c("2017-05-24","2017-06-22")), Y=11, season = "B"),
+  data.frame(X=as.Date(c("2017-06-02","2017-07-01")), Y=12, season = "C"),
+  data.frame(X=as.Date(c("2017-06-12","2017-07-11")), Y=13, season = "D"),
+  data.frame(X=as.Date(c("2017-06-22","2017-07-21")), Y=14, season = "E"),
+  data.frame(X=as.Date(c("2017-07-03","2017-08-01")), Y=15, season = "F") )
+
+#Plot
+PhotoSolstice = ggplot() +
+  #day length line
+  geom_line(data=phot.sub, aes(x=X, y=V1, group=1),col="black") +
+  #solstice
+  geom_vline(xintercept = as.Date("2017-06-22"), size=1, alpha=0.4)+
+  #periods
+  geom_line(data=solstice.data, aes(x=X, y=Y, color=season), size=2.75)+
+  scale_color_manual(values = rev(wes_palette(6, name = "Zissou1", type = "continuous")))+
+ 
+  #plot settings
+  coord_cartesian(xlim=c(as.Date(c('2017-03-01','2017-10-31'))), ylim=c(10,16))+
+  ylab("Day length")+xlab("")+
+  plotTheme1
+
+
+# Plot of seasonal periods 
+##########################
+
+#dataframe of periods
+seasonal.data = rbind(data.frame(X=as.Date(c("2017-04-25","2017-05-24")), Y=10.25, season = 'A'),
+                      data.frame(X=as.Date(c("2017-04-25","2017-06-22")), Y=11, season = 'B'),
+                      data.frame(X=as.Date(c("2017-04-25","2017-07-21")), Y=11.75, season = 'C'),
+                      data.frame(X=as.Date(c("2017-04-25","2017-08-20")), Y=12.5, season = 'D'),
+                      data.frame(X=as.Date(c("2017-04-25","2017-10-08")), Y=13.25, season = 'E'),
+                      data.frame(X=as.Date(c("2017-05-24","2017-10-08")), Y=14, season = 'F'),
+                      data.frame(X=as.Date(c("2017-06-22","2017-10-08")), Y=14.75, season = 'G'),
+                      data.frame(X=as.Date(c("2017-07-21","2017-10-08")), Y=15.5, season = 'H') 
+                      #data.frame(X=as.Date(c("2017-08-20","2017-10-08")), Y=16, season = 'I') 
+                      )
+
+#Plot
+PhotoSeasonal = ggplot() +
+  #day length line
+  geom_line(data=phot.sub, aes(x=X, y=V1, group=1),col="black") +
+  #periods
+  geom_line(data=seasonal.data, aes(x=X, y=Y, color=season), size=2)+
+  scale_color_manual(values = rev(wes_palette(8, name = "Zissou1", type = "continuous")))+
+  #solstice
+  geom_vline(xintercept = as.Date("2017-06-22"), size=1, alpha=0.4)+
+  #plot settings
+  coord_cartesian(xlim=c(as.Date(c('2017-03-01','2017-10-31'))), ylim=c(10,16))+
+  ylab("Day length")+xlab("")+
+  plotTheme1
+ 
+
+  
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+###########
+# Figures #
+###########
+
+
+#create identifier
+variable = c("Azani", "Tday")
+
+#loop
+for (variable.name in variable){
+
+  ##############################################################################################################################################
+  ##############################################################################################################################################
+  
+  
+  ###############
+  # Monthly plots
+  ###############
+  
+  
+  #subset the table
+  #################
+  
+  MonthlyMM.df.sub = MonthlyMM.df  %>% 
+    filter(variable == variable.name,
+           grepl("monthly.scaled",equation) )
+  
+  df.interp.sub = df.interp  %>% 
+    filter(variable == variable.name,
+           grepl("monthly.scaled",equation) )
+  
+  df.AUC.sub = df.AUC  %>% 
+    filter(variable == variable.name,
+           grepl("monthly.scaled",equation) )
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # Plots
+  #######
+  
+  #set x and y ranges
+  if(variable.name %in% c("Azani")){
+    xRange=c(3.2, 9.9)
+    yRange=c(-0.1,0.1)
+    yRange2=c(-0.14,0.14)} else {
+      xRange=c(1.3, 9.7)
+      yRange=c(-0.14, 0.14)
+      yRange2=c(-0.2, 0.2) }
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #All species
+  plotA = ggplot() + 
+    geom_area(data = df.interp.sub[df.interp.sub$species=='Aall',], aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=MonthlyMM.df.sub[MonthlyMM.df.sub$species=='Aall',], 
+               aes(x=term, y=estimate))+
+    geom_errorbar(data=MonthlyMM.df.sub[MonthlyMM.df.sub$species=='Aall',], 
+                  aes(x=term, ymin=estimate-2*std.error, ymax=estimate+2*std.error), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.sub[df.AUC.sub$species=='Aall',], mapping = aes(x = -Inf, y = Inf, 
+                                               hjust = -0.1, vjust = 1.5,
+                                               label = paste0(percent.neg,'% / ',percent.pos, '%')))+
+    coord_cartesian(xlim=xRange, ylim=yRange)+
+    xlab("")+ylab("Standardized effect")+
+    scale_x_continuous(breaks = seq(1,10,by=1),
+                      labels = c('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'))+
+    plotTheme1
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #Species-specific
+  plotB = ggplot() + 
+    geom_area(data = df.interp.sub[df.interp.sub$species!='Aall',], aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=MonthlyMM.df.sub[MonthlyMM.df.sub$species!='Aall',], 
+               aes(x=term, y=estimate))+
+    geom_errorbar(data=MonthlyMM.df.sub[MonthlyMM.df.sub$species!='Aall',], 
+                  aes(x=term, ymin=estimate-2*std.error, ymax=estimate+2*std.error), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.sub[df.AUC.sub$species!='Aall',], 
+              mapping = aes(x = -Inf, y = Inf, hjust = -.1, vjust = 1.5,
+                            label = paste0(percent.neg,'% / ',percent.pos, '%')) ) +
+    coord_cartesian(xlim=xRange,ylim=yRange2)+
+    xlab("")+ylab('')+
+    facet_wrap(~species,ncol=2)+
+    scale_x_continuous(breaks = seq(1,10,by=2),
+                       labels = c('Jan','Mar','May','Jul','Sep'))+
+    plotTheme1
+  
+  
+  ##############################################################################################################################################
+  ##############################################################################################################################################
+  
+  
+  #################
+  # Prediction plot
+  #################
+  
+  
+  #create variables
+  variable.full = paste0('Prediction.Full.',         variable.name)
+  variable.post = paste0('Prediction.PostSolstice.', variable.name)
+  variable.pre  = paste0('Prediction.PreSolstice.',  variable.name)
+  
+  #data wrangling
+  Predictions.df2 = Predictions.df %>%
+    #get time series-level prediction anomalies
+    group_by(timeseries)%>%
+    mutate(Prediction.Full = !!as.name(variable.full) - mean(!!as.name(variable.full)),
+           Prediction.Post = !!as.name(variable.post) - mean(!!as.name(variable.post)),
+           Prediction.Pre  = !!as.name(variable.pre)  - mean(!!as.name(variable.pre)) ) %>%
+    ungroup() %>%
+    dplyr::select(c(leaf_off_anomaly,MATanomaly,Prediction.Full,Prediction.Post,Prediction.Pre))%>%
+    pivot_longer(-MATanomaly)%>%
+    mutate(name = plyr::revalue(name, c("leaf_off_anomaly" = "Observed",
+                                        "Prediction.Full"  = "Full model",
+                                        "Prediction.Post"  = "Post-solstice model",
+                                        "Prediction.Pre"   = "Pre-solstice model")),
+           name = factor(name, levels=c("Observed", "Full model",  "Pre-solstice model", "Post-solstice model"), ordered=T))
+  
+  #get linear model coefficients
+  resultsLM = Predictions.df2 %>% 
+    group_by(name) %>% 
+    do({model = lm(value ~ MATanomaly, data=.)  # create your model
+    data.frame(tidy(model))})%>%            # get model info
+    filter(!term %in% c("(Intercept)")) 
+  
+  #Plot
+  plotForeacst = ggplot(data=Predictions.df2, aes(y=value, x=MATanomaly, color=name, linetype=name)) +
+    geom_hline(yintercept=0)+
+    geom_smooth(method = "gam", formula = y ~ s(x, k = 3),level=0.99, size=1.25)+
+    scale_color_manual(values=c('black','black','#F21A00','#3B9AB2'))+
+    scale_linetype_manual(values=c('dotted','solid','solid','solid'))+
+    ylab("Senescence anomaly (days)")+xlab("MAT anomaly (C)")+
+    annotate(geom="text", x=Inf, y = Inf, vjust=1.5, hjust=1.5, 
+             label=paste0(round(resultsLM[resultsLM$name=='Observed',]$estimate,1),' days/C'))+
+    annotate(geom="text", x=Inf, y = Inf, vjust=3.5, hjust=1.5, 
+             label=paste0(round(resultsLM[resultsLM$name=='Full model',]$estimate,1),' days/C'))+
+    annotate(geom="text", x=Inf, y = Inf, vjust=5.5, hjust=1.5, color='#F21A00',
+             label=paste0(round(resultsLM[resultsLM$name=='Pre-solstice model',]$estimate,1),' days/C'))+
+    annotate(geom="text", x=Inf, y = Inf, vjust=7.5, hjust=1.5, color='#3B9AB2',
+             label=paste0(round(resultsLM[resultsLM$name=='Post-solstice model',]$estimate,1),' days/C'))+
+    coord_cartesian(xlim=c(-2.3,2.1), ylim = c(-3.5,3.5))+
+    plotTheme1+
+    theme(legend.position = c(0.27, 0),
+          legend.justification = c(0, 0))+
+    guides(color=guide_legend(override.aes=list(fill=NA)))
+  
+  
+  ##############################################################################################################################################
+  ##############################################################################################################################################
+  
+  
+  ################
+  # Seasonal plots
+  ################
+  
+  
+  #subset the data
+  ################
+  
+  #Solstice
+  SolsticeMM.df.sub = SeasonalMM.df  %>% 
+    filter(variable == variable.name &
+             species == 'Aall' &
+             grepl("Solstice.scaled",equation) )
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #Seasonal
+  SeasonalMM.df.sub = SeasonalMM.df  %>% 
+   filter(variable == variable.name,
+          species == 'Aall',
+          grepl("Seasonal.scaled",equation) ) %>%
+    #order variables
+    mutate(variable.class=factor(variable.class, 
+                                 levels = c("LO.SOm30","LO.SO","LO.SOp30","LO.SOp60","LO.SE","SOm30.SE","SO.SE","SOp30.SE","SOp60.SE"), ordered=T))
+   
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # Plot
+  ######
+  
+  #set y ranges
+  if(variable.name %in% c("Azani", 'Tday')){
+    yRange=c(-0.15,0.15)} else {
+      yRange=c(-0.27, 0.27)}
+  
+  #Solstice
+  plotD = ggplot(data = SolsticeMM.df.sub, aes(x = variable.class, y = estimate, fill=variable.class)) + 
+    geom_bar(stat = "identity")+
+    geom_errorbar(aes(ymin = estimate - 2*std.error, ymax = estimate + 2*std.error), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    xlab("") + ylab("Standardized effect") +
+    coord_cartesian(ylim = yRange) +
+    scale_fill_manual(values = rev(wes_palette(6, name = "Zissou1", type = "continuous")))+
+    scale_x_discrete(labels=c("solstice1" = "May 13\nJun 11", "solstice2" = "May 23\nJun 21",
+                              "solstice3" = "Jun 2\nJul 1", "solstice4"="Jun 12\nJul 11",
+                              "solstice5"="Jun 22\nJul 21", "solstice6"="Jul 2\nJul 31"))+
+    plotTheme1 +
+    annotation_custom(ggplotGrob(PhotoSolstice), 
+                      xmin = 0.5,  xmax = 4.5, 
+                      ymin = 0.01, ymax = yRange[2])
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #Seasonal
+  plotE = ggplot(data = SeasonalMM.df.sub, aes(x = variable.class, y = estimate, fill=variable.class)) + 
+    geom_bar(stat = "identity")+
+    geom_errorbar(aes(ymin = estimate - 2*std.error, ymax = estimate + 2*std.error), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    xlab("") + ylab("") +
+    coord_cartesian(ylim = yRange) +
+    scale_fill_manual(values = rev(wes_palette(8, name = "Zissou1", type = "continuous")))+
+    scale_x_discrete(labels=c("LO.SOm30" = "Out-May", "LO.SO" = "Out-Sol", "LO.SOp30" = "Out-Jul",
+                              "LO.SOp60" = "Out-Aug", "LO.SE"="Out-Off","SOm30.SE"="May-Off",
+                              "SO.SE" = "Sol-Off", "SOp30.SE"="Jul-Off"))+
+    plotTheme1+
+    theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+    #add photoperiod graph
+    annotation_custom(ggplotGrob(PhotoSeasonal), 
+                      xmin = 0.5,  xmax = 5.5, 
+                      ymin = 0.01, ymax = yRange[2])
+  
+  
+  ##############################################################################################################################################
+  ##############################################################################################################################################
+  
+  
+  ##################
+  # Full model plots
+  ##################
+  
+  
+  #subset
+  FullMM.df.sub = FullMM.df  %>% 
+    filter(variable == variable.name &
+            species == 'Aall') %>%
+    #order variables
+    mutate(term = factor(term, levels=c(paste0(variable.name,".LO.SO"), "Prcp.LO.SO", "Prcp.SO.SE", 
+                                        'CO2',paste0(variable.name,".SO.SE"),'Tnight'), ordered=T))
+  
+  # Plot
+  plotC = ggplot(data = FullMM.df.sub, aes(x = term, y = estimate, fill=term)) + 
+    geom_bar(stat = "identity")+
+    geom_errorbar(aes(ymin = estimate - 2*std.error, ymax = estimate + 2*std.error), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    xlab("") + ylab("") +
+    coord_cartesian(ylim = c(-0.24,0.24)) +
+    scale_fill_manual(values = c('#F21A00','grey60','grey35','black','#3B9AB2','#78B7C5'))+
+    scale_x_discrete(labels = c(paste0(variable.name," pre"),
+                                'Prcp pre','Prcp post','CO2',
+                                paste0(variable.name," post"),
+                                'Autumn Tnight'))+
+    plotTheme1 +
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+  
+  
+  ##############################################################################################################################################
+  ##############################################################################################################################################
+  
+  
+  #####################
+  # Moving window plots
+  #####################
+  
+  
+  ###############################################
+  # Climate-phenology relationship reversal dates
+  ###############################################
+  
+  
+  # 20-year moving window
+  #######################
+  
+  #subset
+  MWreversal.df.sub = MWreversal.df  %>% 
+    filter(variable == variable.name,
+           dataset == 'Long')
+  
+  #get linear model coefficients
+  resultsLM = MWreversal.df.sub %>% 
+    filter(species == 'Aall') %>% 
+    do({model = lm(as.numeric(date0) ~ year, data=.)  # create your model
+    data.frame(tidy(model),                # get coefficient info
+               glance(model))})%>%            # get model info
+    filter(!term %in% c("(Intercept)")) 
+  
+  #plot
+  plotF = ggplot(MWreversal.df.sub, aes(x = year, y = date0, group=species, color=species)) + 
+    
+    geom_hline(yintercept=as.Date('2000-06-21'),size=1.5, alpha=0.2)+
+    
+    geom_line(size = 0.75) +
+    
+    geom_ribbon(data=MWreversal.df.sub[MWreversal.df.sub$species=='Aall',], 
+                aes(ymin = date0.lower, ymax = date0.upper,), 
+                fill = "darkgrey", color=NA, alpha = 0.7) + 
+    
+    geom_smooth(data=MWreversal.df.sub[MWreversal.df.sub$species=='Aall',], 
+                aes(x = year, y = date0), 
+                method='lm', formula = y~x, se = FALSE, linetype="dashed")+
+  
+    geom_line(data=MWreversal.df.sub[MWreversal.df.sub$species=='Aall',], 
+              aes(x = year, y = date0), size = 1.25) +
+    
+    scale_color_manual(values = rev(wes_palette("Darjeeling2", n = 5))) +
+    
+    coord_cartesian(xlim=c(1967.3,1994.7), ylim=c(as.Date('2000-05-31'),as.Date('2000-07-31')))+
+    
+    annotate(geom="text", x=Inf, y = as.Date(Inf, origin="1970-01-01"), vjust=1.5, hjust=1.05, 
+             label=paste0(round(resultsLM$estimate,1),' days per year, R2 = ', round(resultsLM$r.squared,2)))+
+    
+    xlab("") + ylab('Date')+
+    scale_y_date(date_labels = "%b %d")+
+    scale_x_continuous(breaks = seq(1966,1996,by=5),
+                       labels = c('1966-1985','1971-1990','1976-1995','1981-2000','1986-2005','1991-2010','1996-2015'))+
+    plotTheme1+
+    guides(col = guide_legend(ncol = 2))+
+    theme(axis.text.x          = element_text(angle = 45, hjust=1),
+          legend.position      = c(0.00, 0.00),
+          legend.justification = c("left", "bottom"))
+  
+  plotF.Supp = plotF +
+    scale_x_continuous(breaks = seq(1966,1996,by=5),
+                       labels = c('','','','','','',''))
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # 15-year moving window
+  #######################
+  
+  #subset
+  MWreversal.df.sub = MWreversal.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Short')
+  
+  #get linear model coefficients
+  resultsLM = MWreversal.df.sub %>% 
+    filter(species == 'Aall') %>% 
+    do({model = lm(as.numeric(date0) ~ year, data=.)  # create your model
+    data.frame(tidy(model),                # get coefficient info
+               glance(model))})%>%            # get model info
+    filter(!term %in% c("(Intercept)")) 
+  
+  #plot
+  plotF.short = ggplot(MWreversal.df.sub, aes(x = year, y = date0, group=species, color=species)) + 
+    
+    geom_hline(yintercept=as.Date('2000-06-21'),size=1.5, alpha=0.2)+
+    
+    geom_line(size = 0.75) +
+    
+    geom_ribbon(data=MWreversal.df.sub[MWreversal.df.sub$species=='Aall',], 
+                aes(ymin = date0.lower, ymax = date0.upper,), 
+                fill = "darkgrey", color=NA, alpha = 0.7) + 
+    
+    geom_smooth(data=MWreversal.df.sub[MWreversal.df.sub$species=='Aall',], 
+                aes(x = year, y = date0), 
+                method='lm', formula = y~x, se = FALSE, linetype="dashed")+
+    
+    geom_line(data=MWreversal.df.sub[MWreversal.df.sub$species=='Aall',], 
+              aes(x = year, y = date0), size = 1.25) +
+    
+    scale_color_manual(values = rev(wes_palette("Darjeeling2", n = 5))) +
+    
+    coord_cartesian(xlim=c(1981.5,2000.08), ylim=c(as.Date('2000-05-31'),as.Date('2000-07-31')))+
+    
+    annotate(geom="text", x=Inf, y = as.Date(Inf, origin="1970-01-01"), vjust=1.5, hjust=1.05, 
+             label=paste0(round(resultsLM$estimate,1),' days per year, R2 = ', round(resultsLM$r.squared,2)))+
+    
+    xlab("") + ylab('')+
+    scale_y_date(date_labels = "%b %d")+
+    scale_x_continuous(breaks = seq(1981,2001,by=5),
+                       labels = c('','','','',''))+
+    plotTheme1+
+    theme(legend.position = 'right')
+  
+  
+  ##############################################################################################################################################
+  
+  
+  ######################
+  # Monthly correlations
+  ######################
+  
+  
+  # All species
+  #############
+  
+  #subset
+  MW.df.sub = MW.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Long',
+           equation == 'monthly', 
+           species  == 'Aall')%>%
+    filter(term %in% c('4','5','6','7','8','9'))%>%
+    #rename factors
+    mutate(term = if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                                          'GSI','GSIrad')){
+      plyr::revalue(term, c("5"="May", '6'='Jun','7'='Jul','8'='Aug'))} else {
+        plyr::revalue(term, c('4'='Apr',"5"="May", '6'='Jun','7'='Jul','8'='Aug','9'='Sep'))
+      } ) %>%
+    #order factors
+    mutate(term = factor(term, levels=c('Apr',"May", 'Jun',"Jul", "Aug",'Sep'), ordered=T))
+  
+  #define color scale
+  if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                          'GSI','GSIrad')){
+    col.scale = c('#F21A00','#E1AF00','#78B7C5','#3B9AB2')
+    } else {
+      col.scale = c('darkred','#F21A00','#E1AF00','#EBCC2A','#78B7C5','#3B9AB2')
+    }
+  
+  #plot
+  plotMWmonth = 
+    ggplot(MW.df.sub, aes(x = year, y = estimate, ymin = estimate-2*std.error, ymax = estimate+2*std.error,
+                                group=term, color=term)) + 
+    geom_hline(yintercept=0)+
+    geom_ribbon(fill = "darkgrey", color=NA, alpha = 0.6) + 
+    geom_line(size = 1) +
+    scale_color_manual(values = col.scale)+
+    coord_cartesian(xlim=c(1967.3,1994.7),ylim=c(-0.22,0.22))+
+    xlab("") + ylab('Standardized effect')+
+    scale_x_continuous(breaks = seq(1966,1996,by=5),
+                       labels = c('','','','','','',''))+
+    plotTheme1
+  
+  #Arrange legend horizontally
+  if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                          'GSI','GSIrad')){
+    plotMWmonth = plotMWmonth +
+      guides(col = guide_legend(nrow = 1, byrow = TRUE)) }
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # Species-specific
+  ##################
+  
+  #subset
+  MW.df.sub = MW.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Long',
+           equation == 'monthly', 
+           species  != 'Aall')%>%
+    filter(term %in% c('4','5','6','7','8','9'))%>%
+    #rename factors
+    mutate(term = if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                                          'GSI','GSIrad')){
+      plyr::revalue(term, c("5"="May", '6'='Jun','7'='Jul','8'='Aug'))} else {
+        plyr::revalue(term, c('4'='Apr',"5"="May", '6'='Jun','7'='Jul','8'='Aug','9'='Sep'))
+      } ) %>%
+    #order factors
+    mutate(term = factor(term, levels=c('Apr',"May",'Jun',"Jul", "Aug",'Sep'), ordered=T))
+  
+  #plot
+  plotMWmonth.species = 
+    ggplot(MW.df.sub, aes(x = year, y = estimate, ymin = estimate-2*std.error, ymax = estimate+2*std.error,
+                          group=term, color=term)) + 
+    geom_hline(yintercept=0)+
+    geom_ribbon(fill = "darkgrey", color=NA, alpha = 0.6) + 
+    geom_line(size = 1) +
+    scale_color_manual(values=col.scale)+
+    coord_cartesian(xlim=c(1967.3,1994.7),ylim=c(-0.28,0.28))+
+    xlab("") + ylab('Standardized effect')+
+    scale_x_continuous(breaks = seq(1966,1996,by=5),
+                       labels = c('1966-1985','1971-1990','1976-1995','1981-2000','1986-2005','1991-2010','1996-2015'))+
+    plotTheme1+
+    theme(axis.text.x          = element_text(angle = 45, hjust=1),
+          legend.position      = 'bottom',
+          legend.title         = element_blank(),
+          strip.text.x         = element_blank())+
+    facet_wrap(~species,ncol=1)+
+    guides(col = guide_legend(nrow = 2, byrow = TRUE))
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # 15-year moving window
+  #######################
+  
+  #subset
+  MW.df.sub = MW.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Short',
+           equation == 'monthly', 
+           species  == 'Aall') %>%
+    filter(term %in% c('4','5','6','7','8','9'))%>%
+    #rename factors
+    mutate(term = if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                                          'GSI','GSIrad')){
+      plyr::revalue(term, c("5"="May", '6'='Jun','7'='Jul','8'='Aug'))} else {
+        plyr::revalue(term, c('4'='Apr',"5"="May", '6'='Jun','7'='Jul','8'='Aug','9'='Sep'))
+      } ) %>%
+    #order factors
+    mutate(term = factor(term, levels=c('Apr',"May",'Jun',"Jul", "Aug",'Sep'), ordered=T))
+  
+  #plot
+  plotMWmonth.short = ggplot(MW.df.sub, aes(x = year, y = estimate, ymin = estimate-2*std.error, ymax = estimate+2*std.error,
+                          group=term, color=term)) + 
+    geom_hline(yintercept=0)+
+    geom_ribbon(fill = "darkgrey", color=NA, alpha = 0.6) + 
+    geom_line(size = 1) +
+    scale_color_manual(values=col.scale)+
+    xlab("") + ylab('')+
+    scale_x_continuous(breaks = seq(1981,2001,by=5),
+                       labels = c('','','','',''))+
+    coord_cartesian(xlim=c(1981.5,2000.08), ylim=c(-0.22,0.22))+
+    plotTheme1+
+    theme(legend.position = 'right',
+          legend.title    = element_blank())
+  
+  
+  ##############################################################################################################################################
+  
+  
+  ######################
+  # Full model over time
+  ######################
+  
+  
+  # All species
+  #############
+  
+  #subset
+  MW.df.full = MW.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Long',
+           equation == 'full model', 
+           species  == 'Aall') %>%
+    #order factors
+    mutate(term = factor(term, levels=c(paste0(variable.name,".LO.SO"), "Prcp.LO.SO", "Prcp.SO.SE", 
+                                        'CO2',paste0(variable.name,".SO.SE"),'Tnight'), ordered=T))
+  
+  #set y ranges
+  if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                          'GSIrad','SWrad','Tday','Tnight')){
+    yRange = c(-0.24,0.24)} else {yRange = c(-0.28, 0.28)}
+  
+  #plot 
+  plotMWfull = ggplot(MW.df.full, aes(x = year, y = estimate, ymin = estimate-2*std.error, ymax = estimate+2*std.error,
+                                group=term, color=term)) + 
+    geom_hline(yintercept=0)+
+    geom_ribbon(fill = "darkgrey", color=NA, alpha = 0.6) + 
+    geom_line(size = 1) +
+    scale_color_manual(values=c('#F21A00','grey60','grey35','black','#3B9AB2','#78B7C5'))+
+    coord_cartesian(xlim = c(1967.3,1994.7), ylim = yRange)+
+    xlab("") + ylab('Standardized effect')+
+    scale_x_continuous(breaks = seq(1966,1996,by=5),
+                       labels = c('1966-1985','1971-1990','1976-1995','1981-2000','1986-2005','1991-2010','1996-2015'))+
+    plotTheme1+
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+
+  # Species-specific
+  ##################
+  
+  #subset
+  MW.df.full = MW.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Long',
+           equation == 'full model', 
+           species  != 'Aall') %>%
+    #order factors
+    mutate(term = factor(term, levels=c(paste0(variable.name,".LO.SO"), "Prcp.LO.SO", "Prcp.SO.SE", 
+                                        'CO2',paste0(variable.name,".SO.SE"),'Tnight'), ordered=T))
+  
+  #set y ranges
+  if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                          'GSIrad','SWrad','Tday','Tnight')){
+    yRange = c(-0.28,0.28)} else {yRange = c(-0.33, 0.33)}
+  
+  #plot 
+  plotMWfull.species = ggplot(MW.df.full, aes(x = year, y = estimate, ymin = estimate-2*std.error, ymax = estimate+2*std.error,
+                                 group=term, color=term)) + 
+    geom_hline(yintercept=0)+
+    geom_ribbon(fill = "darkgrey", color=NA, alpha = 0.6) + 
+    geom_line(size = 1) +
+    scale_color_manual(values=c('#F21A00','grey60','grey35','black','#3B9AB2','#78B7C5'))+
+    coord_cartesian(xlim = c(1967.3,1994.7), ylim = yRange)+
+    xlab("") + ylab('')+
+    scale_x_continuous(breaks = seq(1966,1996,by=5),
+                       labels = c('1966-1985','1971-1990','1976-1995','1981-2000','1986-2005','1991-2010','1996-2015'))+
+    plotTheme1+
+    theme(axis.text.x = element_text(angle = 45, hjust=1),
+          legend.position = 'bottom')+
+    facet_wrap(~species,ncol=1,strip.position = "right")+
+    guides(col = guide_legend(nrow = 3, byrow = TRUE))
+
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # 15-year moving window
+  #######################
+  
+  #subset
+  MW.df.full = MW.df  %>% 
+    filter(variable == variable.name,
+           dataset  == 'Short',
+           equation == 'full model', 
+           species  == 'Aall')%>%
+    #order factors
+    mutate(term = factor(term, levels=c(paste0(variable.name,".LO.SO"), "Prcp.LO.SO", "Prcp.SO.SE", 
+                                        'CO2',paste0(variable.name,".SO.SE"),'Tnight'), ordered=T))
+  
+  #set y ranges
+  if(variable.name %in% c("Apm", "ApmJmaxA", "ApmJmaxB",
+                          "Azani", "AzaniJmaxA", "AzaniJmaxB", 
+                          'GSIrad','SWrad','Tday','Tnight')){
+    yRange = c(-0.24,0.24)} else {yRange = c(-0.33, 0.33)}
+  
+  #plot 
+  plotMWfull.short = ggplot(MW.df.full, aes(x = year, y = estimate, ymin = estimate-2*std.error, ymax = estimate+2*std.error,
+                                 group=term, color=term)) + 
+    geom_hline(yintercept=0)+
+    geom_ribbon(fill = "darkgrey", color=NA, alpha = 0.6) + 
+    geom_line(size = 1) +
+    scale_color_manual(values=c('#F21A00','grey60','grey35','black','#3B9AB2','#78B7C5'))+
+    xlab("") + ylab('')+
+    scale_x_continuous(breaks = seq(1981,2001,by=5),
+                       labels = c('1981-1995','1986-2000','1991-2005','1996-2010','2001-2015'))+
+    coord_cartesian(xlim = c(1981.5,2000.08), ylim = yRange)+
+    plotTheme1+
+    theme(axis.text.x     = element_text(angle = 45, hjust=1),
+          legend.position = 'right',)
+  
+  
+  ##############################################################################################################################################
+  ##############################################################################################################################################
+  
+  
+  ##########################
+  # Arrange and safe plots #
+  ##########################
+  
+  
+  #################
+  # Figs. 4 and S15
+  #################
+  
+  #define plot layout
+  layout <- "
+  ABC
+  DEF"
+  
+  #Merge plots
+  Fig4_Plot = plotA + plotB + plotC + plotD + plotE + plotF + 
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plots as .pdf
+  ggsave(Fig4_Plot, file=paste('Fig4_',variable.name, ".pdf", sep=''), path=output_path,
+         width=11, height=8)
+  
+  print(Fig4_Plot)
+  
+  
+  ######################################
+  # Temperature response plot (Fig. S16)
+  ######################################
+  
+  ggsave(plotForeacst, file=paste('FigS16_TempResponse.',variable.name, ".pdf", sep=''), path=output_path,
+         width=4, height=4)
+  
+  print(plotForeacst)
+  
+  
+  ################################
+  # Species-specific moving window
+  ################################
+  
+  #define plot layout
+  layout <- "AB"
+  
+  #Merge plots
+  Supp_Plot =  plotMWmonth.species + plotMWfull.species +
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A')&
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plots as .pdf
+  ggsave(Supp_Plot, file=paste('MW.species.',variable.name, ".pdf", sep=''), path=output_path,
+         width=7, height=10)
+  
+  print(Supp_Plot)
+  
+  
+  ###########################
+  # Moving windows (Fig. S19)
+  ###########################
+  
+  #define plot layout
+  layout <- "
+  AB
+  CD
+  EF"
+  
+  #Merge plots
+  Supp_Plot2 =  
+    plotF.Supp + plotF.short + 
+    plotMWmonth + plotMWmonth.short + 
+    plotMWfull + plotMWfull.short +
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A')&
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plots as .pdf
+  ggsave(Supp_Plot2, file=paste('FigS19_MW.',variable.name, ".pdf", sep=''), path=output_path,
+         width=8.5, height=9)
+  
+  print(Supp_Plot2)
+  
+  
+  ##############################################################################################################################################
+  
+  #count
+  print(variable.name)
+}
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## date time
+Sys.time()
+
+
+## session info
+sessionInfo()
+```

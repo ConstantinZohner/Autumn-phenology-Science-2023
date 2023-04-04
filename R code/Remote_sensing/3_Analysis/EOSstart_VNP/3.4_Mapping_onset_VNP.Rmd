@@ -1,0 +1,965 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 30, 2023"
+
+subtitle: Satellite-derived EOSstart data (Figure S8)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S8: Effect of temperature on the timing of senescence onset in northern forests reverses after the summer solstice (same as Fig. 2A but using EOSstart instead of EOS10 as phenological metric) 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(ggplot2)
+require(patchwork)
+require(gmodels)
+require(wesanderson)
+require(pracma)
+require(lme4)
+require(effects) #plot effects
+require(remef)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Remote_sensing/Analysis")
+
+
+# Paths
+
+#input
+Drivers_path      = "Analysis_input/Drivers_final_onset_VNP/Merged_file"
+Analysis_path     = "Analysis_output_startSen_VNP/Data"
+photo_path        = "Analysis_input/Drivers" #Photoperiod file
+
+#output
+output_path       = "Analysis_output_startSen_VNP/Maps"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#Spatial (pixel-level) models
+#############################
+
+#scaled
+Analysis.df = fread(paste(Analysis_path, "Spatial_effect_data_onset_VNP.csv", sep="/")) %>% 
+  mutate(continent = ifelse(Lon < -30, "North America", "Eurasia"),
+         LC_Type   = paste(LC_Type, continent, sep="_"))
+
+#unscaled
+AnalysisNoScaling.df = fread(paste(Analysis_path, "Spatial_effect_data_onset_VNP_no_scaling.csv", sep="/")) %>% 
+  mutate(continent = ifelse(Lon < -30, "North America", "Eurasia"),
+         LC_Type   = paste(LC_Type, continent, sep="_"))
+#geometry: unique pixel identifier
+#Lat: Latitude
+#Lon: Longitude
+#LC_type: All, DecB, DecN, EvgN, Mixed (Landcover type)
+#term: monthly coefficients (1-10) and seasonal coefficients
+#estimate: slopes or standardized coefficients of mixed effects models
+#std.error: std.error of coefficients
+#statistic: 
+#equation: full model 1/2, monthly/seasonal/solstice, scaled/unscaled, tempCon (Tday controlled)
+#variable: climate variable (LAI, GPP, Apm, Azani, Tday, Tnight, SWrad)
+
+
+# get full model correlations
+#############################
+
+FullModel.df = Analysis.df %>%
+  filter(equation == "full model 1")
+
+ReducedModel.df = AnalysisNoScaling.df %>%
+  filter(equation == "full model 2")
+
+
+#-------------------------------------------------------------------------------------------------------
+
+
+# get monthly correlations
+##########################
+
+#Summarize all pixels
+MonthlyAnalysisAll.df = Analysis.df %>%
+  filter(equation == "monthly") %>%
+  group_by(term, variable) %>%
+  summarise(mean  = gmodels::ci(estimate)[1], 
+            lowCI = gmodels::ci(estimate)[2],
+            hiCI  = gmodels::ci(estimate)[3],
+            lowSD = mean-sd(estimate),
+            hiSD  = mean+sd(estimate)) %>%
+  mutate(LC_Type = "All") %>%
+  ungroup()
+
+#Summarize by vegetation type
+MonthlyAnalysisLCtype.df = Analysis.df %>%
+  filter(equation == "monthly") %>%
+  group_by(term, variable, LC_Type) %>%
+  summarise(mean  = gmodels::ci(estimate)[1], 
+            lowCI = gmodels::ci(estimate)[2],
+            hiCI  = gmodels::ci(estimate)[3],
+            lowSD = mean-sd(estimate),
+            hiSD  = mean+sd(estimate)) %>%
+  ungroup()
+
+#Rbind
+MonthlyAnalysis.df = rbind(MonthlyAnalysisAll.df, MonthlyAnalysisLCtype.df) %>%
+  #Add variable x equation identifier
+  mutate(variable.type = paste(variable, LC_Type, sep='.'),
+         term = as.numeric(term),
+         LC_Type = factor(LC_Type, levels = c("All",
+                                              "Mixed_North America", "Mixed_Eurasia",
+                                              "DecB_North America", "DecB_Eurasia",
+                                              "EvgN_North America", "EvgN_Eurasia",
+                                              "DecN_Eurasia"))
+         )
+
+
+#-------------------------------------------------------------------------------------------------------
+
+
+# get seasonal correlations
+###########################
+
+SeasonalModel.df = Analysis.df %>%
+  filter(equation == "Solstice.scaled") %>%
+  #Add variable class identifier
+  mutate(variable.class = gsub("^.*?\\.","", term) )
+
+
+##############################################################################################################################################
+
+
+#Phenology data
+###############
+
+Pheno.df = fread(paste(Drivers_path, "Remote_sensing_drivers_data_onset_VNP_preseason.csv", sep="/")) 
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+################
+## Plot theme ##
+################
+
+
+#Color.palette:  col=c('#F21A00','#E1AF00','#EBCC2A','#78B7C5','#3B9AB2')
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(hjust = 0.5))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+######################
+# Photoperiod figure #
+######################
+
+
+#get mean leaf-out and senescence dates
+leaf_out = as.Date(mean(Pheno.df$Onset_Greenness_Decrease), origin = "2016-12-31")
+leaf_off = as.Date(mean(Pheno.df$Onset_Greenness_Decrease), origin = "2016-12-31")
+
+# dataframe of photoperiods
+photo.df   = fread(paste(photo_path, "Photoperiod.csv", sep="/"))
+phot.sub   = photo.df[475,3:367]
+phot.sub   = rbind(as.data.frame(t(phot.sub)), as.data.frame(t(phot.sub)))
+phot.sub$X = as.Date(1:nrow(phot.sub), origin = "2016-12-31")
+
+
+# Plot of periods around solstice
+#################################
+
+#dataframe of periods
+solstice.data = rbind(
+  data.frame(X=as.Date(c("2017-05-14","2017-06-12")), Y=10, season = "A"),
+  data.frame(X=as.Date(c("2017-05-24","2017-06-22")), Y=11, season = "B"),
+  data.frame(X=as.Date(c("2017-06-02","2017-07-01")), Y=12, season = "C"),
+  data.frame(X=as.Date(c("2017-06-12","2017-07-11")), Y=13, season = "D"),
+  data.frame(X=as.Date(c("2017-06-22","2017-07-21")), Y=14, season = "E"),
+  data.frame(X=as.Date(c("2017-07-03","2017-08-01")), Y=15, season = "F") )
+
+#Plot
+PhotoSolstice = ggplot() +
+  #day length line
+  geom_line(data=phot.sub, aes(x=X, y=V1, group=1),col="black") +
+  #solstice
+  geom_vline(xintercept = as.Date("2017-06-22"), size=1, alpha=0.4)+
+  #periods
+  geom_line(data=solstice.data, aes(x=X, y=Y, color=season), size=2.75)+
+  scale_color_manual(values = rev(wes_palette(6, name = "Zissou1", type = "continuous")))+
+  #plot settings
+  coord_cartesian(xlim=c(as.Date(c('2017-03-01','2017-10-31'))), ylim=c(10,16))+
+  ylab("Day length")+xlab("")+
+  scale_x_date(position = "top") +
+  plotTheme1+
+  theme(plot.background  = element_rect(fill = "transparent", color = NA),
+        panel.background = element_rect(fill = "white"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########################################
+## Interpolation of monthly estimates ##
+########################################
+
+
+
+#Interpolation function
+lin_interp = function(x, y, length.out=100) {
+  approx(x, y, xout=seq(min(x), max(x), length.out=length.out))$y
+}
+
+#create identifier
+variable.type = unique(MonthlyAnalysis.df$variable.type)
+
+#create interpolation dataframe
+df.interp = data.frame()
+df.AUC = data.frame()
+
+#loop over variable x equation x vegetation type vector
+for (variable.name in variable.type){
+  
+  #subset table
+  df.sub = MonthlyAnalysis.df  %>% 
+    filter(variable.type == variable.name)
+  
+  # Interpolate data
+  created.interp = lin_interp(df.sub$term, df.sub$term)
+  score.interp   = lin_interp(df.sub$term, df.sub$mean)
+  df.interp.sub  = data.frame(created=created.interp, score=score.interp)
+  # Make a grouping variable for each pos/neg segment
+  cat.rle        = rle(df.interp.sub$score < 0)
+  df.interp.sub  = df.interp.sub %>%
+    mutate(group = rep.int(1:length(cat.rle$lengths),  times=cat.rle$lengths),
+           LC_Type  = unique(df.sub$LC_Type),
+           variable = unique(df.sub$variable) )
+  #rbind sub dataframes 
+  df.interp = rbind(df.interp, df.interp.sub)
+  
+  #get Area under curve (%)
+  df.AUC.sub = df.interp.sub %>%
+    mutate(positive = ifelse(score<0, 0, score),
+           negative = ifelse(score>0, 0, score))%>%
+    summarise(sum.pos = trapz(created, positive), 
+              sum.neg = abs(trapz(created, negative)))%>%
+    mutate(percent.neg = round(sum.neg/(sum.pos+sum.neg)*100),
+           percent.pos = round(sum.pos/(sum.pos+sum.neg)*100),
+           LC_Type  = unique(df.sub$LC_Type),
+           variable = unique(df.sub$variable) )
+  #rbind sub dataframes 
+  df.AUC = rbind(df.AUC, df.AUC.sub)
+}
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########################
+# Mixed effects models #
+########################
+
+
+
+#Prepare data
+#############
+
+#delete outlier values
+PhenoMixed.df <- Pheno.df %>%
+  filter(GPPstart.LO.SO < quantile(.$GPPstart.LO.SO, 0.999),
+         GPPstart.LO.SO > quantile(.$GPPstart.LO.SO, 0.01))
+  
+#get year mean
+YearMean = mean(PhenoMixed.df$Year)
+
+#transform units and center year variable
+PhenoMixed.df <- PhenoMixed.df %>%
+  mutate(GPPstart.LO.SO = GPPstart.LO.SO*0.1,
+         Year           = Year - mean(Year)) %>%
+  #delete pixels with less than 15 years
+  group_by(geometry) %>%
+  filter(n() >= 9) %>%
+  ungroup()
+
+
+##################################################################
+#get advance in EOSonset per each 10% increase in pre-solstice GPP
+##################################################################
+  
+coefficients = coef(summary(lmer(Onset_Greenness_Decrease ~ GPPstart.LO.SO + (1 | geometry), data=PhenoMixed.df,
+             na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))))[2,1:2]
+
+#relative to overall variation
+coefficients  * (max(PhenoMixed.df$GPPstart.LO.SO)-min(PhenoMixed.df$GPPstart.LO.SO))/10
+#Estimate  Std. Error 
+#-2.14698871  0.01622658
+
+
+##############################################################################################################################################
+
+
+# Models
+########
+
+#list variables to loop through
+#variables = unique(Analysis.df$variable)
+variables = c("Tday","GPPstart")
+
+#create List object to store results
+DataList1 = replicate(length(variables), data.frame())
+DataList2 = replicate(length(variables), data.frame())
+DataList3 = replicate(length(variables), data.frame())
+names(DataList1) = variables
+names(DataList2) = variables
+names(DataList3) = variables
+
+##############################################################################################################################################
+
+
+#Loop through variables
+#######################
+
+for (i in 1:length(variables)){
+
+  #extract variables
+  Year         = as.numeric(PhenoMixed.df$Year)
+  Pre.solstice = as.numeric(PhenoMixed.df %>% pull(paste0(variables[i],".LO.SO")))
+  Senesc_DOY   = as.numeric(PhenoMixed.df$Onset_Greenness_Decrease)
+  geometry     = PhenoMixed.df$geometry
+
+
+  #Multivariate
+  fit_multi = lmer(Senesc_DOY ~ Pre.solstice + Year + (1 | geometry), 
+                       na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))
+
+  #year-only
+  fit_year = lmer(Senesc_DOY ~ Year + (1 | geometry), 
+                   na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))
+
+  # Extract information for plotting
+  plotMulti   = allEffects(fit_multi)
+  plotYear    = allEffects(fit_year)
+  
+  # Extract coefficients
+  df.coefficients = tibble(Coefficient = coef(summary(fit_multi))[ , "Estimate"][2:3],
+                           variable = c(paste0(variables[i]),"Year"),
+                           class = paste0(variables[i])) %>% 
+    bind_rows(tibble(Coefficient = coef(summary(fit_year))[ , "Estimate"][2],
+                     variable = c("Year"),
+                     class = "Univariate"))
+
+  # Final table
+  df <- tibble(upper    = plotYear$Year$upper[,1],
+               lower    = plotYear$Year$lower[,1],
+               off      = plotYear$Year$fit[,1],
+               xval     = plotYear$Year$x[,1],
+               class    = "Univariate",
+               variable = "Year") %>%
+    #Multi
+    bind_rows(
+      tibble(upper    = plotMulti$Year$upper[,1],
+             lower    = plotMulti$Year$lower[,1],
+             off      = plotMulti$Year$fit[,1],
+             xval     = plotMulti$Year$x[,1],
+             class    = paste0(variables[i]),
+             variable = "Year")
+    )%>% 
+    bind_rows(
+      tibble(upper    = plotMulti$Pre.solstice$upper[,1],
+             lower    = plotMulti$Pre.solstice$lower[,1],
+             off      = plotMulti$Pre.solstice$fit[,1],
+             xval     = plotMulti$Pre.solstice$x[,1],
+             class    = paste0(variables[i]),
+             variable = paste0(variables[i]))
+  )
+  
+  
+  # get phenology anomalies
+  df = df %>%
+    group_by(class, variable) %>%
+    mutate(anomaly       = off - mean(off),
+           anomaly.upper = upper - mean(off),
+           anomaly.lower = lower - mean(off)) %>%
+    ungroup()
+
+  ##############################################################################################################################################
+  
+  # get partial Senescence dates, removing effect of year (fixed) and site (random)
+  y_partial = remef(fit_multi, fix="Year", ran="all", keep.intercept = T)
+  
+  # Create table 
+  df.fitted = tibble(fitted   = y_partial,
+                     x        = Pre.solstice,
+                     variable = variables[i])
+  
+  ##############################################################################################################################################
+  
+  #store data frame in variable list
+  DataList1[[i]] = df 
+  DataList2[[i]] = df.coefficients
+  DataList3[[i]] = df.fitted
+  
+  #count
+  print(paste0('...',i,' out of ',length(variables), ' (',variables[i],') done'))
+}
+
+#bind rows
+MixedModel.df   = bind_rows(DataList1) 
+coefficients.df = bind_rows(DataList2) 
+fitted.df       = bind_rows(DataList3)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##############
+# Map figure #
+##############
+
+
+
+#start loop
+for(variable.name in variables) {
+
+  #subset and reshape data 
+  Analysis.df.sub2 = ReducedModel.df %>%
+    filter(variable == variable.name,
+           term %in% c(paste0(variable.name,'.SO.SE'),paste0(variable.name,'.LO.SO'))) %>%
+    mutate(term = factor(term, levels=c(paste0(variable.name,".SO.SE"),
+                                        paste0(variable.name,".LO.SO") ), ordered=T),
+           positive = ifelse(estimate>0,1,0),
+           negative = ifelse(estimate<0,1,0),
+           positive.sign = ifelse(estimate>0 & p.value<0.05,1,0),
+           negative.sign = ifelse(estimate<0 & p.value<0.05,1,0))
+
+  
+  ##############################################################################################################################################
+  
+  
+  ###########
+  # Histogram
+  ###########
+
+  #create summary info
+  VariablesVector = c("estimate","p.value","positive","negative","positive.sign","negative.sign")
+  data1 = Analysis.df.sub2 %>% 
+    group_by(term) %>% 
+    summarize_at(VariablesVector, mean, na.rm = TRUE) 
+  
+  if(variable.name %in% c('GPPstart')){
+    xRange=c(-0.15,0.15)
+    yRange=c(-.08,.08)
+    binw = 0.0018} else {
+      xRange=c(-6,6)
+      yRange=c(-3.5,3.5)
+      binw = .035}
+  
+  #Plot
+  HistoPlot = ggplot(Analysis.df.sub2, aes(x=estimate, fill=term, alpha=term)) +
+    geom_histogram(binwidth=binw, position="identity") +
+    geom_vline(xintercept=0, colour="black") +
+    scale_fill_manual(values = c('black','#F21A00'))+
+    scale_alpha_discrete(range = c(0.5, 0.8))+
+    #add pre-solstice text
+    geom_text(data    = data1[data1$term==paste0(variable.name,".LO.SO"),],
+              mapping = aes(x = -Inf, y = Inf, hjust = -0.1, vjust = 1.5, 
+                            label = paste(variable.name, " pre:\nMean = ",round(estimate,2), "\n", 
+                                          round(negative*100), "% (", round(negative.sign*100), '%)', sep="")), 
+              size=3.5, color='#F21A00')+
+    #add post-solstice text
+    geom_text(data    = data1[data1$term==paste0(variable.name,".SO.SE"),],
+              mapping = aes(x = Inf, y = Inf, hjust = 1.1, vjust = 1.5, 
+                            label = paste(variable.name, " post:\nMean = ",round(estimate,2), "\n", 
+                                          round(positive*100), "% (", round(positive.sign*100), '%)', sep="")), 
+              size=3.5, color='black')+
+    xlab("days per unit") +
+    ylab("Count (number of pixels)") +
+    coord_cartesian(xlim = xRange, ylim = c(12, 270))+
+    plotTheme1 
+  
+  
+  ##############################################################################################################################################
+
+  
+  ###################
+  # Latitudinal plots
+  ###################
+  
+
+  LatPlot = Analysis.df.sub2 %>%
+    mutate(LatRound = round(Lat)) %>%
+    group_by(term, LatRound) %>%
+    summarise(mean = ci(estimate)[1],
+              lowCI = ci(estimate)[2],
+              highCI = ci(estimate)[3]) %>% 
+    ggplot(aes(x = LatRound, y= mean, group=term, color=term, group=term, alpha=term)) + 
+    geom_ribbon(aes(ymin=lowCI, ymax=highCI, fill=term), color=NA)+
+    geom_line()+
+    geom_hline(yintercept=0)+
+    scale_color_manual(values = c('black','#F21A00'))+
+    scale_fill_manual(values = c('black','#F21A00'))+
+    scale_alpha_discrete(range = c(0.3, 0.8))+
+    ylab("days per unit") +
+    coord_flip(ylim = yRange, xlim=c(27,75))+
+    plotTheme1 +
+    theme(axis.text.y = element_blank(),
+          axis.title.y = element_blank())
+  
+  
+  ##############################################################################################################################################
+  
+  
+  #########
+  # Mapping
+  #########
+  
+  #subset and reshape data 
+  Analysis.df.sub3 = ReducedModel.df %>%
+    filter(variable == variable.name,
+           term %in% c(paste0(variable.name,'.SO.SE'),paste0(variable.name,'.LO.SO'))) %>%
+    mutate(estimate = if(variable.name == "GPPstart"){ifelse(estimate>.07, .07, ifelse(estimate < -.07, -.07, estimate))} else {
+      ifelse(estimate>3, 3, ifelse(estimate < -3, -3, estimate))} ) %>%
+    dplyr::select(c(Lat, Lon, geometry, variable, term, estimate)) %>%
+    pivot_wider(., names_from = term, values_from = estimate) %>%
+    dplyr::rename('Post' = as.name(paste0(variable.name,'.SO.SE')),
+                  'Pre'  = as.name(paste0(variable.name,'.LO.SO')))
+  
+  #Get world map
+  mp <- NULL
+  mapWorld <- borders("world", colour="gray40", fill="gray40") # create a layer of borders
+  mp <- ggplot() + mapWorld + plotTheme1
+  
+  #Add pre-solstice information
+  MapPre <- mp + geom_tile(data = Analysis.df.sub3, 
+                           show.legend=T,
+                           aes(x = Lon, y = Lat, fill=Pre)) +
+    scale_fill_gradient2(midpoint=0, low='#F21A00', mid="white",  
+                         high='#3B9AB2', space ="Lab" ) +
+    coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+    xlab("") + ylab('Latitude') +
+    theme(legend.position = c(0.08,0.33))
+  
+  #Add post-solstice information
+  MapPost <- mp + geom_tile(data = Analysis.df.sub3, 
+                            show.legend=T,
+                            aes(x = Lon, y = Lat, fill=Post)) +
+    scale_fill_gradient2(midpoint=0, low='#F21A00', mid="white",  
+                         high='#3B9AB2', space ="Lab" ) +
+    coord_cartesian(ylim = c(27, 75), xlim = c(-160, 175)) +
+    xlab("") + ylab('Latitude') 
+    
+  ##############################################################################################################################################
+  
+  
+  ################
+  # Solstice plots
+  ################
+  
+  #subset the data
+  SolsticeModel.df.sub = SeasonalModel.df  %>% 
+    filter(variable == variable.name)
+  
+  # Plot
+  plotSolstice = ggplot(data = SolsticeModel.df.sub, aes(x = variable.class, y = estimate, fill=variable.class)) + 
+    geom_boxplot(outlier.shape = NA, notch=T)+
+    geom_hline(yintercept=0)+
+    xlab("") + ylab("") +
+    coord_cartesian(ylim = c(-.8,.8)) +
+    scale_fill_manual(values = rev(wes_palette(6, name = "Zissou1", type = "continuous")))+
+    scale_x_discrete(labels=c("solstice1" = "May 13\nJun 11", "solstice2" = "May 23\nJun 21",
+                              "solstice3" = "Jun 2\nJul 1", "solstice4"="Jun 12\nJul 11",
+                              "solstice5"="Jun 22\nJul 21", "solstice6"="Jul 2\nJul 31"))+
+    plotTheme1
+  
+  plotSolstice = plotSolstice + annotation_custom(ggplotGrob(PhotoSolstice), 
+                                                  xmin = 0.6,  xmax = 3.6, 
+                                                  ymin = 0.2, ymax = 1.05)
+  
+  
+  ##############################################################################################################################################
+  
+  
+  #######################################
+  # Full model plots (Linear model means)
+  #######################################
+  
+  
+  #All pixels
+  ###########
+
+  plotFull = FullModel.df %>%
+    filter(variable == variable.name) %>%
+    mutate(term = factor(term, 
+                         levels=c(paste0(variable.name, ".LO.SO"),
+                                "Prcp.LO.SO", 'Prcp.SO.SE', "CO2",
+                                paste0(variable.name, ".SO.SE")), ordered=T) ) %>% 
+    ggplot(aes(x = term, y = estimate, fill=term)) + 
+    geom_boxplot(outlier.shape = NA, notch=T)+
+    geom_hline(yintercept=0)+
+    xlab("") + ylab("") +
+    coord_cartesian(ylim = c(-.9,.9)) +
+    scale_fill_manual(values = c('#F21A00','grey60','grey35','black','#3B9AB2'))+
+    scale_x_discrete(labels = c(paste0(variable.name, " pre"),
+                                'Prcp pre','Prcp post',
+                                expression(CO[2]),
+                                paste0(variable.name, " post")))+
+    plotTheme1 +
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #Vegetation-type-specific
+  #########################
+  
+  plotFullLC = FullModel.df %>%
+    filter(variable == variable.name) %>%
+    group_by(LC_Type, term) %>%
+    mutate(LC_Type  = factor(LC_Type, levels=c("Mixed_North America", "Mixed_Eurasia",
+                                               "DecB_North America", "DecB_Eurasia",
+                                               "EvgN_North America", "EvgN_Eurasia",
+                                               "DecN_Eurasia")),
+           term = factor(term, 
+                         levels=c(paste0(variable.name, ".LO.SO"),
+                                  "Prcp.LO.SO", 'Prcp.SO.SE', "CO2",
+                                  paste0(variable.name, ".SO.SE")), ordered=T) ) %>% 
+    ggplot(aes(x = term, y = estimate, fill=term)) + 
+    geom_boxplot(outlier.shape = NA, notch=T)+
+    geom_hline(yintercept=0)+
+    xlab("") + ylab("Standardized effect") +
+    coord_cartesian(ylim = c(-.9,.9)) +
+    scale_fill_manual(values = c('#F21A00','grey60','grey35','black','#3B9AB2'))+
+    scale_x_discrete(labels = c('Out-Sol','Prcp pre','Prcp post',expression(CO[2]),'Sol-Off'))+
+    plotTheme1 +
+    facet_grid(LC_Type~1) +
+    theme(axis.text.x = element_text(angle = 45, hjust=1),
+          strip.text  = element_blank(),)
+  
+  
+  ##############################################################################################################################################
+  
+  
+  ###############
+  # Monthly plots
+  ###############
+  
+  
+  #subset the table
+  #################
+  
+  Monthly.df.sub = MonthlyAnalysis.df  %>% 
+    filter(variable == variable.name) 
+  
+  df.interp.sub = df.interp  %>% 
+    filter(variable == variable.name)
+  
+  df.AUC.sub = df.AUC  %>% 
+    filter(variable == variable.name)
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  # Plots
+  #######
+  
+  #set x and y ranges
+  if(variable.name %in% c('GPP','LAI',"Apm","Azani",'SWrad','GPPstart','LAIstart')){
+    xRange=c(4.1, 8.9) } else {xRange=c(3.2, 8.8) }
+  
+    yRange=c(-0.38,0.38)
+    yRange2=c(-0.55,0.55)
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #All pixels
+  plot.monthly = ggplot() + 
+    geom_area(data = df.interp.sub[df.interp.sub$LC_Type=='All',], aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=Monthly.df.sub[Monthly.df.sub$LC_Type=='All',], 
+               aes(x=term, y=mean))+
+    geom_errorbar(data=Monthly.df.sub[Monthly.df.sub$LC_Type=='All',], 
+                  aes(x=term, ymin=lowCI, ymax=hiCI), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.sub[df.AUC.sub$LC_Type=='All',], mapping = aes(x = -Inf, y = Inf, 
+                                                                            hjust = -0.1, vjust = 1.5,
+                                                                            label = paste0(percent.neg,'% / ',percent.pos, '%')))+
+    coord_cartesian(xlim=xRange, ylim=yRange) +
+    xlab("")+ylab("Standardized effect")+
+    scale_x_continuous(breaks = seq(1,10,by=1),
+                       labels = c('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'))+
+    plotTheme1
+  
+  #-----------------------------------------------------------------------------------------------------------------------
+  
+  #Vegetation-type-specific
+  plot.monthly.LCtype = ggplot() + 
+    geom_area(data = df.interp.sub[df.interp.sub$LC_Type!='All',], aes(x = created, y = score, fill=score>0, group=group)) + 
+    scale_fill_manual(values = c('#F21A00', '#3B9AB2'))+
+    geom_point(data=Monthly.df.sub[Monthly.df.sub$LC_Type!='All',], 
+               aes(x=term, y=mean))+
+    geom_errorbar(data=Monthly.df.sub[Monthly.df.sub$LC_Type!='All',], 
+                  aes(x=term, ymin=lowCI, ymax=hiCI), width=.2,
+                  position=position_dodge(.9)) +
+    geom_hline(yintercept=0)+
+    geom_vline(xintercept=6.3, size=2, alpha=0.4)+
+    geom_text(data = df.AUC.sub[df.AUC.sub$LC_Type!='All',], 
+              mapping = aes(x = -Inf, y = Inf, hjust = -.1, vjust = 1.5,
+                            label = paste0(percent.neg,'% / ',percent.pos, '%')) ) +
+    coord_cartesian(xlim=xRange,ylim=yRange2)+
+    xlab("")+ylab('')+
+    facet_grid(LC_Type~1)+
+    scale_x_continuous(breaks = seq(1,10,by=2),
+                       labels = c('Jan','Mar','May','Jul','Sep'))+
+    plotTheme1 +
+    theme(strip.text.x  = element_blank())
+  
+  
+  ##############################################################################################################################################
+  
+  
+  ###################
+  # Mixed model plots
+  ###################
+  
+
+  #Driver plots
+  MixedModel.df.sub = MixedModel.df %>%
+    filter(variable == variable.name)
+  
+  coefficients.df.sub = coefficients.df %>%
+    filter(variable == variable.name)
+  
+  fitted.df.sub = fitted.df %>%
+    filter(variable == variable.name)
+  
+  driver.plot = ggplot() + 
+    
+    geom_hex(data=fitted.df.sub, aes(y= fitted, x= x), bins=300)+
+    
+    scale_fill_gradient2(low="grey95",mid='#E1AF00',"high"='#F21A00', midpoint=45)+
+    
+    geom_ribbon(data = MixedModel.df.sub, aes(x = xval, ymin = lower, ymax = upper), 
+                alpha = 0.5, fill="black") +
+    
+    geom_line(data=MixedModel.df.sub, aes(xval, off), color="black") +
+    
+    geom_text(data=coefficients.df.sub, aes(label=paste0(round(Coefficient,2)," days per unit\nR2 = ", round(summary(lm(fitted~x, data=fitted.df.sub))$r.squared,2)),
+                                            x=Inf, y=Inf, hjust = 1.1, vjust = 1.5))+
+    
+    coord_cartesian(ylim = c(190,250), xlim = c(min(fitted.df.sub$x)+max(fitted.df.sub$x)/20,
+                                                max(fitted.df.sub$x)-max(fitted.df.sub$x)/20))+
+    
+    labs(x = variable.name, y = expression(EOS[start]~(DOY)))+
+    
+    plotTheme1
+  
+  
+  # Year plots
+  MixedModel.df.sub = MixedModel.df %>%
+    filter(variable == "Year",
+           class %in% c("Univariate",variable.name)) %>%
+    distinct()
+  
+  coefficients.df.sub = coefficients.df %>%
+    filter(variable == "Year",
+           class %in% c("Univariate",variable.name))%>%
+    distinct() 
+  
+  year.plot = ggplot() + 
+    geom_hline(yintercept = 0, linetype="dashed")+
+    geom_ribbon(data = MixedModel.df.sub, aes(x = xval+YearMean, ymin = anomaly.lower, ymax = anomaly.upper, fill=class), 
+                alpha = 0.3) +
+    geom_line(data=MixedModel.df.sub, aes(xval+YearMean, anomaly, color=class)) +
+    theme_classic() +
+    
+    geom_text(data=coefficients.df.sub[coefficients.df.sub$class==variable.name,], 
+              aes(label=paste0("EOS10 ~ Year + ", variable.name, " (", round(Coefficient*10,1)," days per decade)"),
+                  x=Inf, y=Inf,hjust = 1.2, vjust = 2),color='#3B9AB2')+
+    
+    geom_text(data=coefficients.df.sub[coefficients.df.sub$class=="Univariate",], 
+              aes(label=paste0("EOS10 ~ Year (", round(Coefficient*10,1)," days per decade)"),
+                  x=Inf, y=-Inf,hjust = 1.2, vjust = -2),color='#F21A00')+
+    
+    scale_color_manual(values = c('#3B9AB2','#F21A00'))+
+    scale_fill_manual(values = c('#3B9AB2','#F21A00'))+
+    
+    coord_cartesian(ylim = c(-1.5,1.5), xlim=c(2013.5,2020.5))+
+    
+    labs(x = "Year", y = expression(EOS[start]~anomaly))+
+    plotTheme1
+ 
+  
+  ##############################################################################################################################################
+  
+  
+  ##########################
+  # Arrange and safe plots #
+  ##########################
+  
+  
+  # 1. Monthly plots
+  ##################
+  
+  #define plot layout
+  layout <- "ABC"
+  
+  #Merge plots
+  Fig_Plot = plot.monthly + plotFull + plotSolstice + 
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plots as .pdf
+  ggsave(Fig_Plot, file=paste('FigS8_',variable.name, ".pdf", sep=''), 
+         path=output_path,
+         width=11, height=3.5)
+  
+  print(Fig_Plot)
+  
+  # 2. Map plots
+  ##############
+  
+  #define plot layout
+ layout <- "
+AAAAAB
+CCDDEE"
+  
+  #Merge plots
+  Fig_Plot = MapPre + LatPlot +
+    HistoPlot + driver.plot + year.plot + 
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plots as .pdf
+  ggsave(Fig_Plot, file=paste(variable.name, ".pdf", sep=''), 
+         path=output_path,
+         width=12, height=6)
+  
+  print(Fig_Plot)
+  
+  
+  # 3. Vegetation-type-specific plots
+  ###################################
+  
+  #define plot layout
+  layout <- "AB"
+  
+  #Merge plots
+  Fig_Plot = plotFullLC + plot.monthly.LCtype +
+    plot_layout(design = layout) + plot_annotation(tag_levels = 'A') &
+    theme(plot.tag = element_text(face = 'bold'))
+  
+  #save plots as .pdf
+  ggsave(Fig_Plot, file=paste('LCtype_',variable.name, ".pdf", sep=''), 
+         path=output_path,
+         width=6, height=12)
+  
+  print(Fig_Plot)
+  
+  ##############################################################################################################################################
+  
+  #count
+  print(variable.name)
+}
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## date time
+Sys.time()
+
+
+## session info
+sessionInfo()
+```

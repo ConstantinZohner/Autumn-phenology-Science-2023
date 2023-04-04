@@ -1,0 +1,186 @@
+---
+title: "Effect of climate warming on the timing of autumn leaf senescence reverses at the summer solstice"
+subtitle: "Experiment 1: Photosynthesis calculation"
+---
+
+<br><br>
+
+## 1. Load packages
+
+<details><summary>load packages</summary>
+
+```{r, message=FALSE, warning=FALSE}
+require(tidyverse)
+require(data.table)
+require(broom)
+require(gmodels)
+require(patchwork)
+```
+
+</details>
+
+<br>
+
+## 2. Load data
+
+<details>
+
+<summary>data tables</summary>
+
+```{r}
+################
+# define paths #
+################
+
+
+data.dir   = "/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Experiment1/Data/Photosynthesis"
+output.dir = "/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Experiment1/R_output/Photosynthesis"
+
+
+
+############################
+# Load photosynthesis data #
+############################
+
+
+Photo.df = read.table(paste(data.dir, "Photosynthesis.csv", sep="/"), header = T, sep=",") %>%
+  #transform date column
+  mutate(Date = plyr::revalue(Date, c("A" = "May", "B" = "June", "C" = "July")),
+         Date = factor(Date, levels = c("May","June","July"))) %>%
+  #delete Groups
+  filter(!(Group %in% c("M","L","N","O","P"))) 
+```
+ 
+</details><details><summary>ggplot themes</summary>
+
+```{r}
+plotTheme1 = theme(
+  legend.position   = "right",
+  legend.background = element_rect(fill=NA, size=0.5, linetype="solid"),
+  legend.text       = element_text(color="black"),
+  panel.background  = element_blank(),
+  axis.text         = element_text(colour = "black"),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  strip.background  = element_rect(fill=NA),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold",hjust = 0.5))
+```
+
+</details>
+
+<br>
+
+## 3. Analyze photosynthesis data
+
+<details><summary>Sample sizes</summary>
+
+```{r}
+table(Photo.df$Group, Photo.df$Date)
+```
+
+</details>
+
+<details><summary>Linear models</summary>
+
+```{r}
+#Model relative change in photosynthesis
+LM.df = Photo.df %>%
+  #group by Month
+  group_by(Date) %>%
+  #linear model
+  do({model = lm(A ~ Treatment, data=.)  # create your model
+  data.frame(tidy(model),
+             lowCI=ci(model)[,2],
+             hiCI=ci(model)[,3])}) %>%
+  #get percentages by dividing by intercept
+  mutate(Anet.mean = estimate[1],
+         Anet.percent = estimate / Anet.mean *100,
+         Anet.percent.hi = hiCI / Anet.mean *100,
+         Anet.percent.low = lowCI / Anet.mean *100) %>%
+  filter(!term %in% c("(Intercept)"))
+
+as.data.frame(LM.df)
+```
+
+</details>
+
+<br>
+
+## 4. Figures
+
+</details>
+
+<details><summary>plot 1: Absolute and relative photosynthesis</summary>
+
+```{r, fig.align = "center"}
+#####################
+#Plot absolute change
+#####################
+
+absolute.plot = ggplot(Photo.df, aes(x=Date, y=A, fill=Treatment)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_vline(xintercept=1.5, colour="black", linetype="dashed")+
+  geom_vline(xintercept=2.5, colour="black", linetype="dashed")+
+  coord_cartesian(ylim = c(0.48, 10.2))+
+  labs(x = "", y = "Anet (mmol m-2 s-1)") +
+  scale_fill_manual(values = c('#F21A00','#3B9AB2','grey40'))+
+  plotTheme1
+
+
+#####################
+#Plot relative change
+#####################
+
+relative.plot = ggplot(LM.df, aes(x=Date, y=Anet.percent, group = term, fill = term)) + 
+  
+  geom_bar(position=position_dodge(), stat="identity") +
+  geom_errorbar(aes(ymin=Anet.percent.low, ymax=Anet.percent.hi),
+                width=.2,                    # Width of the error bars
+                position=position_dodge(.9))+
+  coord_cartesian(ylim=c(-100,100))+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept=1.5, colour="black", linetype="dashed")+
+  geom_vline(xintercept=2.5, colour="black", linetype="dashed")+
+  scale_fill_manual(values = c('#3B9AB2','grey40')) +
+  labs(x = "Date", y = "Anet change (%)") +
+  plotTheme1 + theme(legend.position = "none")
+
+
+#define plot layout
+layout <- "
+A
+B"
+
+#Merge plots
+PhotosynthesisPlot = absolute.plot + relative.plot +
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'a')&
+  theme(plot.tag = element_text(face = 'bold'))
+
+#Save PDF
+pdf(paste(output.dir,"PhotosynthesisPlot.pdf",sep="/"), width=5, height=5, useDingbats=FALSE)
+PhotosynthesisPlot
+dev.off()
+
+PhotosynthesisPlot
+```
+
+</details>
+
+<br>
+
+## 5. Reproducibility
+
+</details>
+
+<details><summary>Reproducibility info</summary>
+
+```{r}
+## date time
+Sys.time()
+
+## session info
+sessionInfo()
+```
+
+</details>

@@ -1,0 +1,326 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 30, 2023"
+
+subtitle: PEP725 data (Figure S17)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S17: Relationships among pre-solstice carbon uptake (Anetday), year and phenological dates using the local PEP725 observations
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+#required packages
+require(tidyverse)
+require(data.table)
+require(lme4)
+require(effects) #plot effects
+
+
+
+#Plot theme
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.title      = element_blank(),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_blank(),
+  strip.text        = element_text(colour = 'black'),
+  plot.title        = element_text(face="bold"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/PEP_analysis/Analysis")
+
+# paths
+PEP_drivers_path    = "Analysis_input/PEP_drivers_final/Merged_file"
+output_path         = "Analysis_output/Autumn/Mixed_model_plots"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#Phenology dataframe
+####################
+
+PEP.df <- fread(paste(PEP_drivers_path, "pep_drivers_data_preseason.csv", sep="/")) %>%
+  mutate(SWrad.LO.SO = rowSums(.[,363:365]))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########################
+# Mixed effects models #
+########################
+
+
+
+# Preseason-variable + year
+###########################
+
+#Photosynthesis
+fit_multi_Azani = lmer(leaf_off ~ Azani.LO.SO + year + (1|timeseries) + (1|species), data = PEP.df, 
+                       na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))
+summary(fit_multi_Azani)
+plot(allEffects(fit_multi_Azani))
+#Temperature
+fit_multi_Tday = lmer(leaf_off ~ Tday.LO.SO + year + (1|timeseries) + (1|species), data = PEP.df, 
+                       na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))
+#Radiation
+fit_multi_SWrad = lmer(leaf_off ~ SWrad.LO.SO + year + (1|timeseries) + (1|species), data = PEP.df, 
+                      na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))
+#Leaf-out
+fit_multi_out = lmer(leaf_off ~ leaf_out + year + (1|timeseries) + (1|species), data = PEP.df, 
+                       na.action = "na.exclude", control = lmerControl(optimizer ="Nelder_Mead"))
+
+
+# year-only
+###########
+
+#EOS
+fit_year      = lmer(leaf_off ~ year + (1|timeseries) + (1|species), data = PEP.df, na.action = "na.exclude")
+summary(fit_year)
+plot(allEffects(fit_year))
+#SOS
+fit_year_out  = lmer(leaf_out ~ year + (1|timeseries) + (1|species), data = PEP.df, na.action = "na.exclude")
+summary(fit_year_out)
+plot(allEffects(fit_year_out))
+
+
+# Extract information for plotting
+plotMultiAzani   = allEffects(fit_multi_Azani)
+plotMultiTday    = allEffects(fit_multi_Tday)
+plotMultiSWrad   = allEffects(fit_multi_SWrad)
+plotMultiOut     = allEffects(fit_multi_out)
+plotYear         = allEffects(fit_year)
+plotYearOut      = allEffects(fit_year_out)
+
+
+# Extract coefficients
+df.coefficients = tibble(Coefficient = coef(summary(fit_multi_Azani))[ , "Estimate"][2:3],
+                         variable = c("Pre-solstice","Year"),
+                         class = "2.Azani") %>% 
+  bind_rows(tibble(Coefficient = coef(summary(fit_multi_Tday))[ , "Estimate"][2:3],
+                   variable = c("Pre-solstice","Year"),
+                   class = "3.Tday")) %>% 
+  bind_rows(tibble(Coefficient = coef(summary(fit_multi_SWrad))[ , "Estimate"][2:3],
+                   variable = c("Pre-solstice","Year"),
+                   class = "4.SWrad")) %>% 
+  bind_rows(tibble(Coefficient = coef(summary(fit_multi_out))[ , "Estimate"][2:3],
+                   variable = c("Pre-solstice","Year"),
+                   class = "5.Out")) %>% 
+  bind_rows(tibble(Coefficient = coef(summary(fit_year))[ , "Estimate"][2],
+                   variable = c("Year"),
+                   class = "1.Univariate")) %>% 
+  bind_rows(tibble(Coefficient = coef(summary(fit_year_out))[ , "Estimate"][2],
+                   variable = c("Pre-solstice"),
+                   class = "1.Univariate")) %>%
+  #Increase in expected delay over time after controlling for pre-solstice conditions
+  mutate(SlopeIncrease = Coefficient / coef(summary(fit_year))[ , "Estimate"][2])
+
+
+# Final table
+df <- tibble(upper    = plotYear$year$upper[,1],
+             lower    = plotYear$year$lower[,1],
+             off      = plotYear$year$fit[,1],
+             xval     = plotYear$year$x[,1],
+             class    = "1.Univariate",
+             variable = "Year") %>% 
+  bind_rows(
+    tibble(upper    = plotYearOut$year$upper[,1],
+           lower    = plotYearOut$year$lower[,1],
+           off      = plotYearOut$year$fit[,1],
+           xval     = plotYearOut$year$x[,1],
+           class    = "1.Univariate",
+           variable = "Pre-solstice"))%>% 
+  
+  #Photosynthesis
+  bind_rows(
+    tibble(upper    = plotMultiAzani$year$upper[,1],
+           lower    = plotMultiAzani$year$lower[,1],
+           off      = plotMultiAzani$year$fit[,1],
+           xval     = plotMultiAzani$year$x[,1],
+           class    = "2.Azani",
+           variable = "Year")
+  )%>% 
+  bind_rows(
+    tibble(upper    = plotMultiAzani$Azani.LO.SO$upper[,1],
+           lower    = plotMultiAzani$Azani.LO.SO$lower[,1],
+           off      = plotMultiAzani$Azani.LO.SO$fit[,1],
+           xval     = plotMultiAzani$Azani.LO.SO$x[,1],
+           class    = "2.Azani",
+           variable = "Pre-solstice")
+  )%>% 
+  
+  #Temperature
+  bind_rows(
+    tibble(upper    = plotMultiTday$year$upper[,1],
+           lower    = plotMultiTday$year$lower[,1],
+           off      = plotMultiTday$year$fit[,1],
+           xval     = plotMultiTday$year$x[,1],
+           class    = "3.Tday",
+           variable = "Year")
+  )%>% 
+  bind_rows(
+    tibble(upper    = plotMultiTday$Tday.LO.SO$upper[,1],
+           lower    = plotMultiTday$Tday.LO.SO$lower[,1],
+           off      = plotMultiTday$Tday.LO.SO$fit[,1],
+           xval     = plotMultiTday$Tday.LO.SO$x[,1],
+           class    = "3.Tday",
+           variable = "Pre-solstice")
+  )%>% 
+  
+  #Radiation
+  bind_rows(
+    tibble(upper    = plotMultiSWrad$year$upper[,1],
+           lower    = plotMultiSWrad$year$lower[,1],
+           off      = plotMultiSWrad$year$fit[,1],
+           xval     = plotMultiSWrad$year$x[,1],
+           class    = "4.SWrad",
+           variable = "Year")
+  )%>% 
+  bind_rows(
+    tibble(upper    = plotMultiSWrad$SWrad.LO.SO$upper[,1],
+           lower    = plotMultiSWrad$SWrad.LO.SO$lower[,1],
+           off      = plotMultiSWrad$SWrad.LO.SO$fit[,1],
+           xval     = plotMultiSWrad$SWrad.LO.SO$x[,1],
+           class    = "4.SWrad",
+           variable = "Pre-solstice")
+  )%>% 
+  
+  #Leaf-out
+  bind_rows(
+    tibble(upper    = plotMultiOut$year$upper[,1],
+           lower    = plotMultiOut$year$lower[,1],
+           off      = plotMultiOut$year$fit[,1],
+           xval     = plotMultiOut$year$x[,1],
+           class    = "5.Out",
+           variable = "Year")
+  )%>% 
+  bind_rows(
+    tibble(upper    = plotMultiOut$leaf_out$upper[,1],
+           lower    = plotMultiOut$leaf_out$lower[,1],
+           off      = plotMultiOut$leaf_out$fit[,1],
+           xval     = plotMultiOut$leaf_out$x[,1],
+           class    = "5.Out",
+           variable = "Pre-solstice")
+  )
+
+
+# get phenology anomalies
+df = df %>%
+  group_by(class, variable) %>%
+  mutate(anomaly       = off - mean(off),
+         anomaly.upper = upper - mean(off),
+         anomaly.lower = lower - mean(off)) %>%
+  ungroup()
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+########
+# Plot #
+########
+
+
+
+MixedPlot = ggplot() + 
+  geom_hline(yintercept = 0, linetype="dashed")+
+  geom_ribbon(data = df, aes(x = xval, ymin = anomaly.lower, ymax = anomaly.upper, fill=class), 
+              alpha = 0.3) +
+  geom_line(data=df, aes(xval, anomaly, color=class)) +
+  theme_classic() +
+  geom_text(data=df.coefficients, aes(label=paste0(round(Coefficient*10,2)," days per decade \n (", 
+                                                   round(SlopeIncrease,1)," times)"),
+                                      x=Inf, y=Inf,hjust = "inward", vjust = "inward"))+
+  coord_cartesian(ylim=c(-15,15))+
+  labs(x = "", y = "Senescence (DOY)")+
+  scale_color_manual(values = c("black","darkblue","darkblue","darkblue","darkblue"))+
+  scale_fill_manual(values = c("black","darkblue","darkblue","darkblue","darkblue"))+
+  facet_wrap(class~variable, scales="free_x", ncol=2) +
+  plotTheme1
+
+
+#save plots as .pdf
+ggsave(MixedPlot, file="FigS17_MixedPlot.pdf", path=output_path,
+       width=5, height=12)
+
+MixedPlot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## date time
+Sys.time()
+
+
+## session info
+sessionInfo()
+```

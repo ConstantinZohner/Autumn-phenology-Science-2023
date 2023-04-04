@@ -1,0 +1,388 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 31, 2023"
+
+subtitle: Model comparison (Figure S13)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S13: In- and out-of-sample comparison of autumn senescence models, including only pre-solstice (pre-solstice model), only post-solstice (post-solstice model) or both pre- and post-solstice variables (full model)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(data.table)
+require(ggplot2)
+require(wesanderson)
+require(patchwork)
+require(broom)
+require(gmodels)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+
+
+# set working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2")
+
+
+# Paths
+#######
+
+#input
+MODIS.EOS10_path = "Remote_sensing/Analysis/Analysis_output_startSen/Data"
+MODIS.EOS50_path = "Remote_sensing/Analysis/Analysis_output_EOS50/Data"
+PEP_path         = "PEP_analysis/Analysis/Analysis_output/Autumn/Data"
+
+#output
+output_path      = "Remote_sensing/Analysis/Analysis_output_startSen/ModelComparison"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+#Timeseries-level univariate linear models (MODIS EOS10 data)
+#############################################################
+
+MODIS.EOS10.df = fread(paste(MODIS.EOS10_path, "Model_R2_data.csv", sep="/")) %>%
+  filter(model %in% c("pre","post")) %>%
+  mutate(variable = plyr::revalue(variable, c(
+                                      "GPPstart" = "GPP",
+                                      "SWrad" = "SW radiation",
+                                      "Moist" = "Moisture",
+                                      "Greenup_DOY" = "Leafout")),
+         variable = factor(variable, levels=c("GPP","Tday","Leafout","SW radiation","Moisture"), ordered=T)) 
+
+#LC_Type: Land cover type
+#geometry: pixel identifier
+#r.squared: normal R2
+
+
+#Timeseries-level multivariate linear models (MODIS EOS10 data - LOOCV)
+#######################################################################
+
+MODIS.EOS10.CV.df = fread(paste(MODIS.EOS10_path, "Model_R2_CV_data.csv", sep="/")) %>% 
+  mutate(model = factor(model, levels=c("pre","full","post"), ordered=T),
+         adj.r.squared = ifelse(adj.r.squared<0, 0, adj.r.squared))
+
+
+#--------------------------------------------------------------------------------------------
+
+
+#Timeseries-level univariate linear models (MODIS EOS50 data)
+#############################################################
+
+MODIS.EOS50.df = fread(paste(MODIS.EOS50_path, "Model_R2_data.csv", sep="/")) %>%
+  filter(model %in% c("pre","post")) %>%
+  mutate(variable = plyr::revalue(variable, c(
+    "GPPstart" = "GPP",
+    "SWrad" = "SW radiation",
+    "Moist" = "Moisture",
+    "Greenup_DOY" = "Leafout")),
+    variable = factor(variable, levels=c("GPP","Tday","Leafout","SW radiation","Moisture"), ordered=T)) 
+
+#LC_Type: Land cover type
+#geometry: pixel identifier
+#r.squared: normal R2
+
+
+#Timeseries-level multivariate linear models (MODIS EOS50 data - LOOCV)
+#######################################################################
+
+MODIS.EOS50.CV.df = fread(paste(MODIS.EOS50_path, "Model_R2_CV_data.csv", sep="/")) %>% 
+  mutate(model = factor(model, levels=c("pre","full","post"), ordered=T),
+         adj.r.squared = ifelse(adj.r.squared<0, 0, adj.r.squared))
+
+
+#--------------------------------------------------------------------------------------------
+
+
+#Timeseries-level univariate linear models (PEP725 EOS50 data)
+##############################################################
+
+PEP.df = fread(paste(PEP_path, "Model_R2_data.csv", sep="/")) %>% 
+  mutate(species = gsub("^.*?\\_","", timeseries),#delete before _
+         variable = plyr::revalue(variable, c("Azani" = "Anetday (LPJ)",
+                                              "SWrad" = "SW radiation",
+                                              "Moist" = "Moisture",
+                                              "leaf_out" = "Leafout")),
+         variable = factor(variable, levels=c('Anetday (LPJ)',"Tday", "Leafout","SW radiation","Moisture"), ordered=T))  
+
+
+#Timeseries-level multivariate linear models (PEP725 EOS50 data - LOOCV)
+########################################################################
+
+PEP.CV.df = fread(paste(PEP_path, "Model_R2_CV_data.csv", sep="/")) %>% 
+  mutate(model = factor(model, levels=c("pre","full","post"), ordered=T), 
+         adj.r.squared = ifelse(adj.r.squared<0, 0, adj.r.squared))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+################
+## Plot theme ##
+################
+
+plotTheme1 = theme(
+  legend.position   = "none",
+  legend.background = element_blank(),
+  legend.text       = element_text(color="black"),
+  legend.key        = element_blank(),
+  panel.grid.major  = element_blank(),
+  panel.grid.minor  = element_blank(),
+  panel.background  = element_blank(),
+  panel.border      = element_rect(colour = "black", fill=NA),
+  axis.line         = element_line(color = "black"),
+  axis.text         = element_text(colour = "black"),
+  strip.background  = element_rect(fill=NA),
+  plot.title        = element_text(face="bold",hjust = 0.5))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#############
+## Summary ##
+#############
+
+
+
+# Summarize MODIS EOS10 table by groups
+#######################################
+
+data.frame(MODIS.EOS10.df %>% 
+             group_by(model,variable) %>% 
+             summarise(mean  = mean(r.squared)*100, 
+                       mean_round = round(mean),
+                       lowCI = ceiling((ci(r.squared)[2]*100)),
+                       hiCI  = ceiling((ci(r.squared)[3]*100)),
+                       meanAIC = mean(AIC)))
+
+# Summarize MODIS CV table by groups
+####################################
+
+# Which proportion of pixels has an R2 >0.15?
+round(table(MODIS.EOS10.CV.df[MODIS.EOS10.CV.df$CV.R2>=0.15,]$model)/table(MODIS.EOS10.CV.df$model)[1],2)
+round(table(MODIS.EOS10.CV.df[MODIS.EOS10.CV.df$adj.r.squared>=0.15,]$model)/table(MODIS.EOS10.CV.df$model)[1],2)
+
+
+#--------------------------------------------------------------------------------------------
+
+
+# Summarize MODIS EOS50 table by groups
+#######################################
+
+data.frame(MODIS.EOS50.df %>% 
+             group_by(model,variable) %>% 
+             summarise(mean  = mean(r.squared)*100, 
+                       mean_round = round(mean),
+                       lowCI = ceiling((ci(r.squared)[2]*100)),
+                       hiCI  = ceiling((ci(r.squared)[3]*100)),
+                       meanAIC = mean(AIC)))
+
+# Summarize MODIS CV table by groups
+####################################
+
+# Which proportion of pixels has an R2 >0.15?
+round(table(MODIS.EOS50.CV.df[MODIS.EOS50.CV.df$CV.R2>=0.15,]$model)/table(MODIS.EOS50.CV.df$model)[1],2)
+round(table(MODIS.EOS50.CV.df[MODIS.EOS50.CV.df$adj.r.squared>=0.15,]$model)/table(MODIS.EOS50.CV.df$model)[1],2)
+ 
+
+#--------------------------------------------------------------------------------------------
+
+
+#summarize PEP725 table by groups
+#######################################
+
+data.frame(PEP.df %>% 
+             group_by(model,variable) %>% 
+             summarise(mean       = mean(r.squared)*100, 
+                       mean_round = round(mean),
+                       lowCI      = ceiling((ci(r.squared)[2]*100)),
+                       hiCI       = ceiling((ci(r.squared)[3]*100))) )
+
+
+# Summarize PEP725 CV table by groups
+#####################################
+
+# Which proportion of pixels has an R2 >0.15?
+round(table(PEP.CV.df[PEP.CV.df$CV.R2>=0.15,]$model)/table(PEP.CV.df$model)[1],2)
+round(table(PEP.CV.df[PEP.CV.df$adj.r.squared>=0.15,]$model)/table(PEP.CV.df$model)[1],2)
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+###########
+## Plots ##
+###########
+
+
+
+# CV Plot EOS10
+EOS10.CV.plot = ggplot(MODIS.EOS10.CV.df , aes(CV.R2, color=model) ) +
+  geom_vline(xintercept = 0.15, linetype = "dashed")+
+  geom_line(aes(y = 1 - ..y..), stat='ecdf', size=1.3, alpha=0.9) +
+  scale_color_manual(values = rev(wes_palette(3, name = "Zissou1", type = "continuous")))+
+  coord_cartesian(ylim=c(0,0.7), xlim=c(0.023,0.5))+
+  labs(y="Frequency of pixels", x=expression(R^2~"(Leave-one-out cross-validation)")) +
+  plotTheme1
+
+# R2 Plot EOS10
+EOS10.R2.plot = 
+  ggplot(MODIS.EOS10.CV.df , aes(adj.r.squared, color=model) ) +
+  geom_vline(xintercept = 0.15, linetype = "dashed")+
+  geom_line(aes(y = 1 - ..y..), stat='ecdf', size=1.3, alpha=0.9) +
+  scale_color_manual(values = rev(wes_palette(3, name = "Zissou1", type = "continuous")))+
+  coord_cartesian(ylim=c(0,.8), xlim=c(0.0355,.75))+
+  labs(y="Frequency of pixels", x=expression(R^2~"(adjusted)")) +
+  ggtitle(expression(EOS[10]~(Satellite))) +
+  plotTheme1
+
+#-----------------------------------------------------------------------------------------
+  
+# CV Plot EOS50
+EOS50.CV.plot = ggplot(MODIS.EOS50.CV.df , aes(CV.R2, color=model) ) +
+  geom_vline(xintercept = 0.15, linetype = "dashed")+
+  geom_line(aes(y = 1 - ..y..), stat='ecdf', size=1.3, alpha=0.9) +
+  scale_color_manual(values = rev(wes_palette(3, name = "Zissou1", type = "continuous")))+
+  coord_cartesian(ylim=c(0,0.7), xlim=c(0.023,0.5))+
+  labs(y="", x=expression(R^2~"(Leave-one-out cross-validation)")) +
+  plotTheme1
+
+# R2 Plot EOS50
+EOS50.R2.plot = ggplot(MODIS.EOS50.CV.df , aes(adj.r.squared, color=model) ) +
+  geom_vline(xintercept = 0.15, linetype = "dashed")+
+  geom_line(aes(y = 1 - ..y..), stat='ecdf', size=1.3, alpha=0.9) +
+  scale_color_manual(values = rev(wes_palette(3, name = "Zissou1", type = "continuous")))+
+  coord_cartesian(ylim=c(0,0.8), xlim=c(0.0355,0.75))+
+  labs(y="", x=expression(R^2~"(adjusted)")) +
+  ggtitle(expression(EOS[50]~(Satellite))) +
+  plotTheme1
+
+#-----------------------------------------------------------------------------------------
+
+# CV Plot EOS50 PEP725
+PEP.CV.plot = ggplot(PEP.CV.df , aes(CV.R2, color=model) ) +
+  geom_vline(xintercept = 0.15, linetype = "dashed")+
+  geom_line(aes(y = 1 - ..y..), stat='ecdf', size=1.3, alpha=0.9) +
+  scale_color_manual(values = rev(wes_palette(3, name = "Zissou1", type = "continuous")))+
+  coord_cartesian(ylim=c(0,0.7), xlim=c(0.023,0.5))+
+  labs(y="", x=expression(R^2~"(Leave-one-out cross-validation)")) +
+  plotTheme1 +
+  theme(legend.position = "right")
+
+# R2 Plot EOS50
+PEP.R2.plot = ggplot(PEP.CV.df , aes(adj.r.squared, color=model) ) +
+  geom_vline(xintercept = 0.15, linetype = "dashed")+
+  geom_line(aes(y = 1 - ..y..), stat='ecdf', size=1.3, alpha=0.9) +
+  scale_color_manual(values = rev(wes_palette(3, name = "Zissou1", type = "continuous")))+
+  coord_cartesian(ylim=c(0,0.8), xlim=c(0.0355,0.75))+
+  labs(y="", x=expression(R^2~"(adjusted)")) +
+  ggtitle(expression(EOS[50]~(PEP725~data))) +
+  plotTheme1
+
+#-----------------------------------------------------------------------------------------
+
+#define plot layout
+layout <- "
+ABC
+DEF"
+
+#Merge plots
+R2_plot =  
+  EOS10.R2.plot + EOS50.R2.plot + PEP.R2.plot +
+  EOS10.CV.plot + EOS50.CV.plot + PEP.CV.plot +
+  plot_layout(design = layout) + plot_annotation(tag_levels = 'a')&
+  theme(plot.tag = element_text(face = 'bold'))
+
+#save plot as pdf
+ggsave(R2_plot, file="FigS13_ModelComparison_CV.pdf", path=output_path,
+       width=10.5, height=7.5)
+
+R2_plot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## datetime
+Sys.time()
+
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```
+</details>

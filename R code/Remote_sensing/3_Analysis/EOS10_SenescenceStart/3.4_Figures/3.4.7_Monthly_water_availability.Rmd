@@ -1,0 +1,275 @@
+---
+title: Effect of climate warming on the timing of autumn leaf senescence reverses after the summer solstice
+author: Constantin Zohner
+date: "last updated March 31, 2023"
+
+subtitle: Compare GPP/temperature effects with monthly water availability (Fig. S10)
+output:
+  html_document:
+    highlight: haddock
+    toc: false
+    use_bookdown: true
+    df_print: paged
+---
+
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+<br>
+
+### Figure descriptions
+- Fig. S10: The effects of pre-solstice GPP (upper panels) or temperature (lower panels) and monthly water availability (soil moisture in left panels; precipitation in right panels) on inter-annual variation in the timing of EOS10 from satellite observations. 
+
+<br>
+
+### Variable names
+- Prcp...Precipitation
+- Tday...Day-time temperature
+- GPP...Gross primary productivity
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors"
+  )
+```
+
+<br><br>
+
+```{r, message=FALSE, warning=FALSE, attr.source='.numberLines'}
+###################
+# Required packages
+###################
+
+
+
+require(tidyverse)
+require(ggplot2)
+require(data.table)
+require(broom.mixed)
+require(sjmisc)
+require(lme4)
+
+
+
+#define plot themes
+plotTheme1 = theme(legend.position   = "none",
+                   legend.background = element_rect(fill=NA, size=0.5, linetype="solid"),
+                   legend.text       = element_text(color="black"),
+                   panel.grid.major  = element_blank(),
+                   panel.grid.minor  = element_blank(),
+                   panel.background  = element_blank(),
+                   panel.border      = element_rect(colour = "black", fill=NA),
+                   axis.line         = element_line(color = "black"),
+                   axis.text         = element_text(colour = "black"),
+                   strip.background  = element_rect(fill=NA),
+                   strip.text        = element_text(colour = 'black'),
+                   plot.title        = element_text(face="bold"))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Set directories ##
+#####################
+
+
+
+# set the working directory
+setwd("/Users/consti/Desktop/PhD/Publication_material/17_Autumn_phenology_tier2/Remote_sensing/Analysis")
+
+# paths
+Drivers_path    = "Analysis_input/Drivers_final_EOS10/Merged_file"
+output_path     = "Analysis_output_startSen/Monthly_water_availability"
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#################
+## Import data ##
+#################
+
+
+
+Pheno.df <- fread(paste(Drivers_path, "Remote_sensing_drivers_data_startSen_preseason.csv", sep="/")) 
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##################################################################################################
+## Test correlation between monthly (June-September) precipitation and pre-solstice temperature ##
+##################################################################################################
+
+
+
+ModelResults.df = Pheno.df %>%
+  
+  group_by(geometry) %>% 
+  do({
+    
+    #run model
+    ##########
+    
+    model1 = lm(Prcp6~Tday.LO.SO, data=.)
+    model2 = lm(Prcp7~Tday.LO.SO, data=.)
+    model3 = lm(Prcp8~Tday.LO.SO, data=.)
+    model4 = lm(Prcp9~Tday.LO.SO, data=.)
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(rbind(
+      
+      glance(model1) %>% 
+        mutate(var = 'June'),
+      glance(model2) %>% 
+        mutate(var = 'July'),
+      glance(model3) %>% 
+        mutate(var = 'August'),
+      glance(model4) %>% 
+        mutate(var = 'September')
+    ) )
+    
+  }) 
+  
+ModelResults.df %>% 
+  group_by(var) %>% 
+  summarize(mean = round(mean(r.squared), 2))
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##################
+## Mixed models ##
+##################
+
+
+
+ModelResults.df = Pheno.df %>%
+  do({
+    
+    #run model
+    ##########
+    
+    model1 = lmer(scale(Senesc_DOY)~scale(Tday.LO.SO)+scale(Prcp6)+scale(Prcp7)+scale(Prcp8)+scale(Prcp9)+(1|geometry),  
+                  data=., control = lmerControl(optimizer ="Nelder_Mead"))
+    model2 = lmer(scale(Senesc_DOY)~scale(Tday.LO.SO)+scale(Moist6)+scale(Moist7)+scale(Moist8)+scale(Moist9)+(1|geometry),  
+                  data=., control = lmerControl(optimizer ="Nelder_Mead"))
+    model3 = lmer(scale(Senesc_DOY)~scale(GPP.LO.SO)+scale(Prcp6)+scale(Prcp7)+scale(Prcp8)+scale(Prcp9)+(1|geometry),  
+                  data=., control = lmerControl(optimizer ="Nelder_Mead"))
+    model4 = lmer(scale(Senesc_DOY)~scale(GPP.LO.SO)+scale(Moist6)+scale(Moist7)+scale(Moist8)+scale(Moist9)+(1|geometry),  
+                  data=., control = lmerControl(optimizer ="Nelder_Mead"))
+    
+    #create combined dataframe
+    ##########################
+    
+    data.frame(rbind(
+      
+      tidy(model1, effects="fixed") %>% 
+        mutate(var1 = 'Precipitation',
+               var2 = 'Temperature'),
+      tidy(model2, effects="fixed") %>% 
+        mutate(var1 = 'Moisture',
+               var2 = 'Temperature'),
+      tidy(model3, effects="fixed") %>% 
+        mutate(var1 = 'Precipitation',
+               var2 = 'GPP'),
+      tidy(model4, effects="fixed") %>% 
+        mutate(var1 = 'Moisture',
+               var2 = 'GPP')
+      ) )
+    
+  }) %>% 
+  
+  #delete intercept
+  filter(!term %in% c("(Intercept)")) %>% 
+  mutate(term = gsub("scale","",term),
+         term = gsub("\\(|\\)","",term),
+         term = plyr::revalue(term, c("Moist6"="June",
+                                      "Moist7"='July',
+                                      'Moist8'='August',
+                                      'Moist9'='September',
+                                      "Prcp6"="June",
+                                      "Prcp7"='July',
+                                      'Prcp8'='August',
+                                      'Prcp9'='September',
+                                      'GPP.LO.SO'='Pre-solstice',
+                                      'Tday.LO.SO'='Pre-solstice')),
+         term = factor(term, levels = c("Pre-solstice","June","July",'August',"September"))) 
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+##########
+## Plot ##
+##########
+
+
+MonthlyWater.plot = ggplot(data = ModelResults.df, aes(x = term, y = estimate, fill=term)) + 
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin = estimate - 2*std.error, ymax = estimate + 2*std.error), width=.2,
+                position=position_dodge(.9)) +
+  geom_hline(yintercept=0)+
+  xlab("") + ylab("Standardized effect") +
+  coord_cartesian(ylim = c(-0.42,0.42)) +
+  scale_fill_manual(values = c('#F21A00',rep('#3B9AB2',4)))+
+  plotTheme1 +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  facet_grid(var2~var1)
+
+
+#save plots as .pdf
+ggsave(MonthlyWater.plot , file="FigS10_Monthly_water.pdf", path=output_path,
+       width=4.5, height=4.5)
+
+MonthlyWater.plot
+
+
+
+##############################################################################################################################################
+##############################################################################################################################################
+
+
+
+#####################
+## Reproducibility ##	
+#####################
+
+
+
+## date time
+Sys.time()
+
+## session info
+sessionInfo()
+
+
+
+##############################################################################################################################################
+#############################################################THE END##########################################################################
+##############################################################################################################################################
+```
+
